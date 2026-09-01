@@ -16,3 +16,19 @@ export {
   type ErrorVenta,
   type Arqueo,
 } from './venta.js';
+export { normalizarRut, calcularDvRut } from './rut.js';
+export {
+  calcularSaldo,
+  validarPagoMonedero,
+  validarMovimientoManual,
+  type MotivoMonedero,
+  type ErrorPagoMonedero,
+  type ErrorMovimientoManual,
+} from './monedero.js';
+export {
+  nombreBusquedaCliente,
+  detectarDuplicadosCliente,
+  type ConfianzaDuplicado,
+  type ClienteComparable,
+  type DuplicadoCliente,
+} from './cliente.js';

@@ -13,6 +13,7 @@ const ITEMS: { a: string; etiqueta: string; icono: string; rol: RolUsuario }[] =
   { a: '/admin/snacks', etiqueta: 'Alta de snack', icono: '⊞', rol: 'encargado' },
   { a: '/admin/ventas', etiqueta: 'Ventas', icono: '◈', rol: 'encargado' },
   { a: '/admin/turnos', etiqueta: 'Turnos', icono: '▦', rol: 'encargado' },
+  { a: '/admin/clientes', etiqueta: 'Clientes', icono: '◉', rol: 'encargado' },
   { a: '/admin/duplicados', etiqueta: 'Duplicados', icono: '⧉', rol: 'encargado' },
   { a: '/admin/auditoria', etiqueta: 'Auditoría', icono: '≣', rol: 'encargado' },
   { a: '/admin/sync', etiqueta: 'Sincronización', icono: '⇄', rol: 'admin' },

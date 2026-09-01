@@ -8,6 +8,7 @@ import cors from '@fastify/cors';
 import estaticos from '@fastify/static';
 import authPlugin from './plugins/auth.js';
 import rutasAuth from './rutas/auth.js';
+import rutasClientes from './rutas/clientes.js';
 import rutasProductos from './rutas/productos.js';
 import rutasSalud from './rutas/salud.js';
 import rutasSync from './rutas/sync.js';
@@ -37,6 +38,7 @@ export async function construirServidor() {
   await app.register(rutasProductos, { prefix: '/api/v1' });
   await app.register(rutasTurnos, { prefix: '/api/v1' });
   await app.register(rutasVentas, { prefix: '/api/v1' });
+  await app.register(rutasClientes, { prefix: '/api/v1' });
 
   // Producción (P6, H7): el MISMO proceso sirve el build de la web para que la
   // cookie httpOnly SameSite=Strict funcione sin proxy. En dev lo hace Vite.

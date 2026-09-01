@@ -5,6 +5,7 @@ export type {
   ImagenWoo,
   MetaDatoWoo,
   ProductoWoo,
+  UsuarioWoo,
   VariacionWoo,
   AtributoVariacionWoo,
 } from './tipos.js';

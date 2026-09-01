@@ -43,11 +43,22 @@ enum MedioPago {
   transferencia
   mercadopago
   otro
+  monedero // E4 §5.2 — AL FINAL del enum: añadir al final es instantáneo en MySQL
 }
 
 enum EstadoTurno {
   abierto
   cerrado
+}
+
+// E4 §5.1 — motivos del libro del monedero
+enum MotivoMonedero {
+  carga // el cliente entrega dinero y queda como saldo
+  consumo // pagó una venta con saldo
+  devolucion // se anuló una venta pagada con saldo
+  premio_evento // premio de torneo (lo usará E5)
+  ajuste // corrección con nota obligatoria
+  reverso_carga // se deshace una carga equivocada
 }
 
 enum AccionAuditoria {
@@ -68,6 +79,7 @@ model Canal {
 
   productos ProductoCanal[]
   ventas    Venta[]
+  clientes  ClienteCanal[] // E4 §5.3
 }
 
 model Categoria {
@@ -136,10 +148,11 @@ model Usuario {
   activo       Boolean    @default(true)
   creadoEn     DateTime   @default(now())
 
-  turnos         TurnoCaja[]
-  ventas         Venta[]     @relation("VentasRegistradas")
-  ventasAnuladas Venta[]     @relation("VentasAnuladas")
-  auditorias     Auditoria[]
+  turnos              TurnoCaja[]
+  ventas              Venta[]              @relation("VentasRegistradas")
+  ventasAnuladas      Venta[]              @relation("VentasAnuladas")
+  auditorias          Auditoria[]
+  movimientosMonedero MovimientoMonedero[] // E4 §5.3
 }
 
 model TurnoCaja {
@@ -170,7 +183,9 @@ model Venta {
   turnoCaja       TurnoCaja   @relation(fields: [turnoCajaId], references: [id])
   usuarioId       String
   usuario         Usuario     @relation("VentasRegistradas", fields: [usuarioId], references: [id])
-  clienteNombre   String? // texto libre en E1; entidad Cliente en E4
+  clienteId       String? // E4 §5.2 — cliente opcional (M3)
+  cliente         Cliente?    @relation(fields: [clienteId], references: [id])
+  clienteNombre   String? // texto libre de E1; SE MANTIENE, no se migra a Cliente
   subtotal        Int
   descuento       Int         @default(0)
   total           Int
@@ -186,6 +201,7 @@ model Venta {
 
   @@index([creadoEn])
   @@index([turnoCajaId])
+  @@index([clienteId])
 }
 
 model VentaLinea {
@@ -251,4 +267,75 @@ model Auditoria {
 
   @@index([entidad, entidadId])
   @@index([usuarioId, creadoEn])
+}
+
+// ─── Etapa 4: cliente y monedero (docs/07-SDD §5.1) ─────────────────────────
+
+model Cliente {
+  id       String  @id @default(cuid())
+  nombre   String // lo único obligatorio (M2)
+  rut      String? @unique // normalizado sin puntos, con guion: "12345678-9"
+  email    String?
+  telefono String?
+  notas    String? @db.Text
+  activo   Boolean @default(true)
+
+  // Crédito: apagado por defecto. Encenderlo es una decisión por cliente (C8).
+  permiteCredito Boolean @default(false)
+  limiteCredito  Int     @default(0) // CLP. Solo aplica si permiteCredito
+
+  // Nombre normalizado (minúsculas, sin tildes, sin puntuación) para búsqueda
+  // por prefijo. MATCH...AGAINST en modo natural NO hace coincidencia parcial
+  // y con innodb_ft_min_token_size=3 ignora tokens de 1-2 caracteres:
+  // escribir "Ped" no encontraría "Pedro", y el criterio 2 exige que sí.
+  nombreBusqueda String
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  canales     ClienteCanal[]
+  movimientos MovimientoMonedero[]
+  ventas      Venta[]
+  // pedidos PedidoCanal[] — solo si E3 existe (§7.2); E3 no existe aún
+
+  @@index([nombreBusqueda])
+  @@index([telefono])
+}
+
+// Mismo patrón que ProductoCanal (02 §4.1): la identidad externa se mapea,
+// no se migra. Un cliente puede tener cuenta en los dos sitios, en uno, o
+// en ninguno — quien solo compra en la tienda no tiene ClienteCanal.
+model ClienteCanal {
+  id             String    @id @default(cuid())
+  clienteId      String
+  cliente        Cliente   @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  canalId        String
+  canal          Canal     @relation(fields: [canalId], references: [id])
+  externoUserId  Int
+  externoEmail   String?
+  vinculadoEn    DateTime  @default(now())
+  desvinculadoEn DateTime? // desvincular NO borra la fila (M4)
+
+  @@unique([canalId, externoUserId])
+  @@unique([clienteId, canalId])
+  @@index([clienteId])
+}
+
+// Libro append-only. El saldo es SUM(monto). Nunca se actualiza ni se borra
+// una fila: una corrección es una fila nueva de signo contrario (M1, M4).
+model MovimientoMonedero {
+  id             String         @id @default(cuid())
+  clienteId      String
+  cliente        Cliente        @relation(fields: [clienteId], references: [id])
+  monto          Int // CON SIGNO: + entra, − sale
+  motivo         MotivoMonedero
+  referenciaTipo String? // "venta" | "movimiento_monedero"
+  referenciaId   String?
+  nota           String?        @db.Text
+  usuarioId      String
+  usuario        Usuario        @relation(fields: [usuarioId], references: [id])
+  creadoEn       DateTime       @default(now())
+
+  @@index([clienteId, creadoEn])
+  @@index([referenciaTipo, referenciaId])
 }

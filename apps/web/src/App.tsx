@@ -6,11 +6,13 @@ import { iniciarColaVentas } from './cola.js';
 import { BarraLateral } from './components/BarraLateral.js';
 import { RequiereRol } from './components/RequiereRol.js';
 import { Cargando } from './components/base.js';
+import { Cliente } from './pantallas/Cliente.js';
 import { Entrar } from './pantallas/Entrar.js';
 import { MisVentas } from './pantallas/MisVentas.js';
 import { Mostrador } from './pantallas/Mostrador.js';
 import { AltaSnack } from './pantallas/admin/AltaSnack.js';
 import { Auditoria } from './pantallas/admin/Auditoria.js';
+import { Clientes } from './pantallas/admin/Clientes.js';
 import { Duplicados } from './pantallas/admin/Duplicados.js';
 import { Productos } from './pantallas/admin/Productos.js';
 import { Sync } from './pantallas/admin/Sync.js';
@@ -103,11 +105,20 @@ export function App() {
               </Armazon>
             }
           />
+          <Route
+            path="/clientes/:id"
+            element={
+              <Armazon>
+                <Cliente />
+              </Armazon>
+            }
+          />
           <Route path="/admin" element={<Navigate to="/admin/productos" replace />} />
           <Route path="/admin/productos" element={admin(<Productos />)} />
           <Route path="/admin/snacks" element={admin(<AltaSnack />)} />
           <Route path="/admin/ventas" element={admin(<VentasAdmin />)} />
           <Route path="/admin/turnos" element={admin(<TurnosAdmin />)} />
+          <Route path="/admin/clientes" element={admin(<Clientes />)} />
           <Route path="/admin/duplicados" element={admin(<Duplicados />)} />
           <Route path="/admin/auditoria" element={admin(<Auditoria />)} />
           <Route path="/admin/sync" element={admin(<Sync />, 'admin')} />

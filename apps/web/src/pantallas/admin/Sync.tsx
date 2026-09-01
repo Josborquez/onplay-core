@@ -99,6 +99,29 @@ export function Sync() {
     }
   };
 
+  // E4 §7.3: corrida de clientes en simulación — alimenta los candidatos de V18
+  // (Clientes). Vincular es siempre una decisión del encargado, fila por fila.
+  const buscarClientes = async (canalId: string) => {
+    setCorriendo(`${canalId}:clientes`);
+    setResumen(null);
+    setError(null);
+    try {
+      const r = await api<{ totalCanal: number; vinculos: unknown[]; sinCoincidencia: unknown[] }>(
+        `/sync/${canalId}/clientes`,
+        { method: 'POST' },
+      );
+      window.alert(
+        `Se revisaron ${r.totalCanal} cuentas del canal: ${r.vinculos.length} coinciden por correo y ` +
+          `${r.sinCoincidencia.length} no tienen coincidencia. Revisa los candidatos en Clientes.`,
+      );
+      await cargarLogs();
+    } catch {
+      setError('La búsqueda de clientes falló. Revisa la bitácora y vuelve a intentar.');
+    } finally {
+      setCorriendo(null);
+    }
+  };
+
   const marcarResuelto = async (id: string) => {
     try {
       await api(`/sync/logs/${id}`, { method: 'PATCH', body: JSON.stringify({ resuelto: true }) });
@@ -149,6 +172,13 @@ export function Sync() {
                       onClick={() => void importar(canal.id, false)}
                     >
                       Importar
+                    </Boton>
+                    <Boton
+                      cargando={corriendo === `${canal.id}:clientes`}
+                      deshabilitado={corriendo !== null || !enLinea}
+                      onClick={() => void buscarClientes(canal.id)}
+                    >
+                      Buscar clientes
                     </Boton>
                   </div>
                 </div>

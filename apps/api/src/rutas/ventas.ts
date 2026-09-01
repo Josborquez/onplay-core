@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { Prisma } from '@prisma/client';
 import {
   rolAlcanza,
+  validarPagoMonedero,
   validarYCalcularVenta,
   type LineaEntrada,
   type PagoEntrada,
@@ -20,10 +21,23 @@ const MEDIOS_VALIDOS = new Set([
   'transferencia',
   'mercadopago',
   'otro',
+  'monedero', // E4 F3 (§6.2): exige clienteId y saldo suficiente
 ]);
+
+/** Producto-servicio de §6.3: una carga con dinero ES una venta de este SKU. */
+const SKU_CARGA = 'SRV-000001';
+
+/** Rechazo del monedero DENTRO de la transacción (§6.2 pasos 2–3): se aborta
+ * todo — venta, folio y movimiento — y se responde el 422 con el detalle. */
+class ErrorMonedero extends Error {
+  constructor(public cuerpo: Record<string, unknown>) {
+    super(String(cuerpo.error ?? 'MONEDERO'));
+  }
+}
 
 interface CuerpoVenta {
   idempotencyKey?: unknown;
+  clienteId?: unknown; // E4 HC2: cliente identificado, opcional (M3)
   clienteNombre?: unknown;
   descuento?: unknown;
   lineas?: unknown;
@@ -100,8 +114,69 @@ export default async function rutasVentas(app: FastifyInstance) {
         ? req.body.clienteNombre.trim()
         : null;
 
+    // E4 HC2: clienteId opcional; si viene, debe existir y estar activo.
+    let clienteId: string | null = null;
+    if (req.body?.clienteId != null && req.body.clienteId !== '') {
+      if (typeof req.body.clienteId !== 'string') {
+        return reply.code(422).send({ error: 'CUERPO_INVALIDO', detalle: 'clienteId: string' });
+      }
+      const cliente = await prisma.cliente.findUnique({
+        where: { id: req.body.clienteId },
+        select: { id: true, activo: true },
+      });
+      if (!cliente || !cliente.activo) {
+        return reply.code(422).send({ error: 'CLIENTE_NO_ENCONTRADO', detalle: req.body.clienteId });
+      }
+      clienteId = cliente.id;
+    }
+
+    // E4 §6.2/§6.3: total pagado con monedero y total de líneas de carga de saldo.
+    const montoMonedero = pagosCrudos
+      .filter((p) => p.medio === 'monedero')
+      .reduce((s, p) => s + p.monto, 0);
+    const montoCarga = lineas.reduce((s, l, i) => {
+      const producto = l.productoId ? productos.get(l.productoId) : undefined;
+      return producto?.sku === SKU_CARGA ? s + calculo.totalesLinea[i]! : s;
+    }, 0);
+    if (montoMonedero > 0 && !clienteId) {
+      // Criterio 10: sin cliente identificado no hay saldo del que descontar.
+      return reply.code(422).send({ error: 'CLIENTE_REQUERIDO', detalle: 'Un pago con monedero exige clienteId (§6.2)' });
+    }
+    if (montoCarga > 0 && !clienteId) {
+      return reply.code(422).send({ error: 'CLIENTE_REQUERIDO', detalle: 'Una carga de saldo exige clienteId (§6.3)' });
+    }
+    if (montoCarga > 0 && montoMonedero > 0) {
+      return reply.code(422).send({ error: 'MEDIO_PAGO_INVALIDO', detalle: 'Una carga de saldo nunca se paga con monedero (§6.3)' });
+    }
+
     try {
       const venta = await prisma.$transaction(async (tx) => {
+        // E4 §6.2: cerrojo sobre la fila Cliente PRIMERO (determinista incluso
+        // con cero movimientos), Correlativo SIEMPRE al final — orden fijo
+        // obligatorio para no interbloquear dos ventas concurrentes.
+        if (montoMonedero > 0) {
+          const filasCliente = await tx.$queryRaw<
+            { id: string; permiteCredito: number; limiteCredito: number }[]
+          >`SELECT id, permiteCredito, limiteCredito FROM Cliente WHERE id = ${clienteId} FOR UPDATE`;
+          const c = filasCliente[0];
+          if (!c) throw new ErrorMonedero({ error: 'CLIENTE_NO_ENCONTRADO', detalle: clienteId });
+          const agregado = await tx.movimientoMonedero.aggregate({
+            where: { clienteId: clienteId! },
+            _sum: { monto: true },
+          });
+          const saldo = agregado._sum.monto ?? 0;
+          const errorTope = validarPagoMonedero({
+            monto: montoMonedero,
+            saldo,
+            permiteCredito: Boolean(c.permiteCredito),
+            limiteCredito: Number(c.limiteCredito),
+          });
+          if (errorTope) {
+            const { codigo, ...resto } = errorTope;
+            throw new ErrorMonedero({ error: codigo, ...resto });
+          }
+        }
+
         // 10. Folio con SELECT ... FOR UPDATE sobre Correlativo (§5.5).
         const anioActual = new Date().getFullYear();
         const filas = await tx.$queryRaw<{ ultimo: number; anio: number }[]>`
@@ -131,6 +206,7 @@ export default async function rutasVentas(app: FastifyInstance) {
             idempotencyKey,
             turnoCajaId: turno.id,
             usuarioId: req.user.sub,
+            clienteId,
             clienteNombre,
             subtotal: calculo.subtotal,
             descuento,
@@ -157,6 +233,43 @@ export default async function rutasVentas(app: FastifyInstance) {
           include: incluirDetalle,
         });
 
+        // §6.2 paso 4: el consumo de saldo, negativo, referenciando la venta.
+        if (montoMonedero > 0) {
+          await tx.movimientoMonedero.create({
+            data: {
+              clienteId: clienteId!,
+              monto: -montoMonedero,
+              motivo: 'consumo',
+              referenciaTipo: 'venta',
+              referenciaId: creada.id,
+              usuarioId: req.user.sub,
+            },
+          });
+        }
+        // §6.3: la venta de SRV-000001 genera la carga positiva y queda en
+        // Auditoria con usuario, monto y motivo (criterio 11).
+        if (montoCarga > 0) {
+          const movimiento = await tx.movimientoMonedero.create({
+            data: {
+              clienteId: clienteId!,
+              monto: montoCarga,
+              motivo: 'carga',
+              referenciaTipo: 'venta',
+              referenciaId: creada.id,
+              usuarioId: req.user.sub,
+            },
+          });
+          await tx.auditoria.create({
+            data: {
+              usuarioId: req.user.sub,
+              entidad: 'cliente',
+              entidadId: clienteId!,
+              accion: 'crear',
+              valorNuevo: { movimientoId: movimiento.id, motivo: 'carga', monto: montoCarga, folio },
+            },
+          });
+        }
+
         // La advertencia de precio se registra en Auditoria (§5.4).
         if (advertencias.length > 0) {
           await tx.auditoria.create({
@@ -173,6 +286,8 @@ export default async function rutasVentas(app: FastifyInstance) {
       });
       return reply.code(201).send({ venta, advertencias });
     } catch (e) {
+      // Saldo insuficiente o tope de crédito: la transacción entera se abortó (§6.2 paso 5).
+      if (e instanceof ErrorMonedero) return reply.code(422).send(e.cuerpo);
       // Carrera sobre idempotencyKey: dos reintentos simultáneos. Devolver la original.
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
         const original = await prisma.venta.findUnique({
@@ -253,7 +368,12 @@ export default async function rutasVentas(app: FastifyInstance) {
       }
       const venta = await prisma.venta.findUnique({
         where: { id: req.params.id },
-        include: { turnoCaja: true },
+        include: {
+          turnoCaja: true,
+          // E4 §6.4 (HC3): pagos monedero → devolución; líneas SRV-000001 → reverso.
+          pagos: true,
+          lineas: { include: { producto: { select: { sku: true } } } },
+        },
       });
       if (!venta) return reply.code(404).send({ error: 'VENTA_NO_ENCONTRADA' });
       if (venta.estado === 'anulada') {
@@ -277,6 +397,57 @@ export default async function rutasVentas(app: FastifyInstance) {
           },
           include: incluirDetalle,
         });
+        // E4 §6.4: por cada pago monedero, un movimiento POSITIVO de devolución.
+        // El consumo original no se toca (M4).
+        if (venta.clienteId) {
+          for (const pago of venta.pagos.filter((p) => p.medio === 'monedero')) {
+            await tx.movimientoMonedero.create({
+              data: {
+                clienteId: venta.clienteId,
+                monto: pago.monto,
+                motivo: 'devolucion',
+                referenciaTipo: 'venta',
+                referenciaId: venta.id,
+                nota: `Anulación de ${venta.folio}: ${motivo}`,
+                usuarioId: req.user.sub,
+              },
+            });
+          }
+          // Caso simétrico: anular una venta de carga genera el reverso NEGATIVO
+          // — si no, el cliente se llevaría el dinero Y el saldo (criterio 16).
+          const montoCargaAnulada = venta.lineas
+            .filter((l) => l.producto?.sku === SKU_CARGA)
+            .reduce((s, l) => s + l.totalLinea, 0);
+          if (montoCargaAnulada > 0) {
+            const reverso = await tx.movimientoMonedero.create({
+              data: {
+                clienteId: venta.clienteId,
+                monto: -montoCargaAnulada,
+                motivo: 'reverso_carga',
+                referenciaTipo: 'venta',
+                referenciaId: venta.id,
+                nota: `Anulación de ${venta.folio}: ${motivo}`,
+                usuarioId: req.user.sub,
+              },
+            });
+            // Criterio 11: todo reverso queda en Auditoria con usuario, monto y nota.
+            await tx.auditoria.create({
+              data: {
+                usuarioId: req.user.sub,
+                entidad: 'cliente',
+                entidadId: venta.clienteId,
+                accion: 'crear',
+                valorNuevo: {
+                  movimientoId: reverso.id,
+                  motivo: 'reverso_carga',
+                  monto: -montoCargaAnulada,
+                  folio: venta.folio,
+                  nota: motivo,
+                },
+              },
+            });
+          }
+        }
         await tx.auditoria.create({
           data: {
             usuarioId: req.user.sub,

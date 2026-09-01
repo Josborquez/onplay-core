@@ -1,4 +1,4 @@
-import type { CategoriaWoo, ProductoWoo, VariacionWoo } from './tipos.js';
+import type { CategoriaWoo, ProductoWoo, UsuarioWoo, VariacionWoo } from './tipos.js';
 
 export interface ConfigClienteWoo {
   url: string; // p.ej. https://onplaygames.cl
@@ -98,6 +98,27 @@ export class ClienteWoo {
         status: 'any',
         modified_after: desdeIsoUtc,
         dates_are_gmt: 'true',
+        per_page: String(porPagina),
+        page: String(pagina),
+        orderby: 'id',
+        order: 'asc',
+      });
+      if (lote.length === 0) return;
+      yield lote;
+      if (lote.length < porPagina) return;
+      pagina += 1;
+    }
+  }
+
+  /**
+   * Usuarios del canal por `wc/v3/customers` (E4 §7.3) — NUNCA `wp/v2/users`:
+   * las mismas claves ck_/cs_ de solo lectura autentican aquí y el `id` que
+   * devuelve es exactamente el `externoUserId` que espera ClienteCanal.
+   */
+  async *paginarClientes(porPagina = 100): AsyncGenerator<UsuarioWoo[]> {
+    let pagina = 1;
+    for (;;) {
+      const lote = await this.solicitar<UsuarioWoo[]>('GET', 'customers', {
         per_page: String(porPagina),
         page: String(pagina),
         orderby: 'id',

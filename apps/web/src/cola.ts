@@ -9,6 +9,10 @@ import type { PagoNuevo, RespuestaVenta } from './tipos.js';
 
 export interface CuerpoVenta {
   idempotencyKey: string;
+  /** Cliente registrado asociado a la venta (E4); null = venta sin cliente (M3). */
+  clienteId: string | null;
+  /** Nombre libre sin cliente registrado, como en E1 (M3). */
+  clienteNombre: string | null;
   descuento: number;
   lineas: {
     productoId: string | null;

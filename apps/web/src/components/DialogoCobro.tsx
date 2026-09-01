@@ -1,10 +1,13 @@
 // V3 — Cobro (05-SDD §7.2). Teclado dentro del diálogo: foco en Efectivo,
-// 1–6 eligen medio, Enter agrega el pago por lo que falta, segundo Enter confirma.
+// 1–7 eligen medio, Enter agrega el pago por lo que falta, segundo Enter confirma.
+// V15 (E4 §6.2): Monedero solo con cliente asociado y disponible > 0; al
+// elegirlo el monto se precarga con min(falta, disponible). La API revalida.
 import { useEffect, useRef, useState } from 'react';
 import { ErrorApi } from '../api.js';
-import { ETIQUETA_MEDIO, MEDIOS_ORDEN, type MedioPago, type PagoNuevo } from '../tipos.js';
+import { ETIQUETA_MEDIO, MEDIOS_ORDEN, type ClienteResumen, type MedioPago, type PagoNuevo } from '../tipos.js';
 import { clp } from '../utils/formato.js';
 import { Banner, Boton, Campo, CampoMonto, Dialogo, Insignia } from './base.js';
+import { SelectorCliente } from './SelectorCliente.js';
 
 const CON_REFERENCIA: MedioPago[] = ['debito', 'credito', 'transferencia'];
 
@@ -20,6 +23,12 @@ interface Props {
   abierto: boolean;
   total: number;
   enLinea: boolean;
+  /** V15 (E4): cliente asociado a la venta; vive en el Mostrador para llegar al cuerpo. */
+  cliente: ClienteResumen | null;
+  nombreLibre: string;
+  onElegirCliente: (c: ClienteResumen) => void;
+  onQuitarCliente: () => void;
+  onNombreLibre: (nombre: string) => void;
   onCerrar: () => void;
   /** Hace el POST /ventas y devuelve folio + nº de advertencias. */
   onConfirmar: (pagos: PagoNuevo[]) => Promise<{ folio: string; advertencias: number }>;
@@ -29,7 +38,20 @@ interface Props {
   onListo: () => void;
 }
 
-export function DialogoCobro({ abierto, total, enLinea, onCerrar, onConfirmar, onEncolar, onListo }: Props) {
+export function DialogoCobro({
+  abierto,
+  total,
+  enLinea,
+  cliente,
+  nombreLibre,
+  onElegirCliente,
+  onQuitarCliente,
+  onNombreLibre,
+  onCerrar,
+  onConfirmar,
+  onEncolar,
+  onListo,
+}: Props) {
   const [medio, setMedio] = useState<MedioPago>('efectivo');
   const [monto, setMonto] = useState<number | ''>('');
   const [recibido, setRecibido] = useState<number | ''>('');
@@ -42,6 +64,20 @@ export function DialogoCobro({ abierto, total, enLinea, onCerrar, onConfirmar, o
 
   const asignado = pagos.reduce((s, p) => s + p.monto, 0);
   const falta = total - asignado;
+
+  // E4 §6.2: disponible = saldo (+ crédito si lo tiene) menos lo ya asignado a monedero.
+  const asignadoMonedero = pagos.filter((p) => p.medio === 'monedero').reduce((s, p) => s + p.monto, 0);
+  const disponibleMonedero = cliente
+    ? cliente.saldo + (cliente.permiteCredito ? cliente.limiteCredito : 0) - asignadoMonedero
+    : 0;
+  const monederoHabilitado = cliente !== null && disponibleMonedero > 0;
+
+  // Si el cliente se quita a mitad del cobro, el monedero deja de ser válido.
+  useEffect(() => {
+    if (cliente) return;
+    setPagos((prev) => (prev.some((p) => p.medio === 'monedero') ? prev.filter((p) => p.medio !== 'monedero') : prev));
+    setMedio((m) => (m === 'monedero' ? 'efectivo' : m));
+  }, [cliente]);
 
   // Al abrir: estado limpio, monto precargado con el total y foco en Efectivo.
   useEffect(() => {
@@ -66,6 +102,11 @@ export function DialogoCobro({ abierto, total, enLinea, onCerrar, onConfirmar, o
   }, [exito, onListo]);
 
   const elegirMedio = (m: MedioPago) => {
+    if (m === 'monedero') {
+      if (!monederoHabilitado) return;
+      // V15: precarga con lo que alcanza a cubrir el saldo.
+      setMonto(Math.min(falta, disponibleMonedero));
+    }
     setMedio(m);
     setError('');
   };
@@ -78,6 +119,10 @@ export function DialogoCobro({ abierto, total, enLinea, onCerrar, onConfirmar, o
     }
     if (montoNum > falta) {
       setError(`Este pago no puede superar lo que falta (${clp(falta)}).`);
+      return;
+    }
+    if (medio === 'monedero' && montoNum > disponibleMonedero) {
+      setError(`El monedero solo tiene ${clp(disponibleMonedero)} disponibles.`);
       return;
     }
     const pago: PagoNuevo = { medio, monto: montoNum };
@@ -147,7 +192,7 @@ export function DialogoCobro({ abierto, total, enLinea, onCerrar, onConfirmar, o
       return;
     }
     const enCampo = e.target instanceof HTMLInputElement;
-    if (!enCampo && e.key >= '1' && e.key <= '6') {
+    if (!enCampo && e.key >= '1' && e.key <= '7') {
       const m = MEDIOS_ORDEN[Number(e.key) - 1];
       if (m) {
         e.preventDefault();
@@ -206,22 +251,50 @@ export function DialogoCobro({ abierto, total, enLinea, onCerrar, onConfirmar, o
               {falta > 0 ? `Falta por pagar: ${clp(falta)}` : 'Falta por pagar: $0'}
             </p>
 
+            <SelectorCliente
+              cliente={cliente}
+              nombreLibre={nombreLibre}
+              enLinea={enLinea}
+              onElegir={onElegirCliente}
+              onQuitar={onQuitarCliente}
+              onNombreLibre={onNombreLibre}
+            />
+
             <div role="group" aria-label="Medio de pago" className="grid grid-cols-3 gap-2">
-              {MEDIOS_ORDEN.map((m, i) => (
-                <button
-                  key={m}
-                  type="button"
-                  ref={m === 'efectivo' ? refEfectivo : undefined}
-                  onClick={() => elegirMedio(m)}
-                  aria-pressed={medio === m}
-                  className={`h-tactil rounded-campo border px-2 text-cuerpo ${
-                    medio === m ? 'border-ac bg-ac-suave font-semibold text-lab' : 'border-sep bg-bg text-lab2'
-                  }`}
-                >
-                  <span aria-hidden="true" className="num mr-1 text-chico text-lab3">{i + 1}</span>
-                  {ETIQUETA_MEDIO[m]}
-                </button>
-              ))}
+              {MEDIOS_ORDEN.map((m, i) => {
+                const esMonedero = m === 'monedero';
+                const deshabilitado = esMonedero && !monederoHabilitado;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    ref={m === 'efectivo' ? refEfectivo : undefined}
+                    onClick={() => elegirMedio(m)}
+                    disabled={deshabilitado}
+                    aria-pressed={medio === m}
+                    title={
+                      deshabilitado
+                        ? cliente
+                          ? 'El cliente no tiene saldo disponible.'
+                          : 'Asocia un cliente para pagar con monedero.'
+                        : undefined
+                    }
+                    className={`h-tactil rounded-campo border px-2 text-cuerpo ${
+                      medio === m
+                        ? 'border-ac bg-ac-suave font-semibold text-lab'
+                        : deshabilitado
+                          ? 'cursor-not-allowed border-sep bg-bg2 text-lab3'
+                          : 'border-sep bg-bg text-lab2'
+                    }`}
+                  >
+                    <span aria-hidden="true" className="num mr-1 text-chico text-lab3">{i + 1}</span>
+                    {ETIQUETA_MEDIO[m]}
+                    {esMonedero && monederoHabilitado ? (
+                      <span className="num ml-1 text-chico text-lab3">· {clp(disponibleMonedero)}</span>
+                    ) : null}
+                  </button>
+                );
+              })}
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-3">

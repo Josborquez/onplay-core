@@ -84,15 +84,45 @@ export function AccesoRapido({ onAgregar }: { onAgregar: (p: ProductoCache) => v
           ) : null}
           <div className="mt-3 grid max-h-[45vh] grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3 lg:grid-cols-4">
             {productos.map((p) => (
-              <button
+              // Tarjeta al estilo del POS de referencia: pie con precio + botón «+».
+              // El botón es el objetivo accesible (teclado); el resto de la tarjeta también agrega.
+              <div
                 key={p.id}
-                type="button"
                 onClick={() => onAgregar(p)}
-                className="flex min-h-fila flex-col justify-between rounded border border-sep bg-bg p-3 text-left"
+                className="flex min-h-fila cursor-pointer flex-col overflow-hidden rounded-tarjeta border border-sep bg-bg transition-all active:scale-[0.97]"
               >
-                <span className="line-clamp-2 text-cuerpo font-medium text-lab">{p.nombre}</span>
-                <span className="num mt-1 font-semibold text-lab">{clp(p.precioVenta)}</span>
-              </button>
+                <p className="flex-1 p-2 text-left text-cuerpo font-medium leading-tight text-lab line-clamp-2">
+                  {p.nombre}
+                </p>
+                <div className="mt-auto flex items-center justify-between gap-1 px-2 pb-2">
+                  <span className="num font-black text-cuerpo leading-none text-lab">{clp(p.precioVenta)}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAgregar(p);
+                    }}
+                    aria-label={`Agregar ${p.nombre}`}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-ac-relleno text-sobre-ac transition-all active:scale-90"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="15"
+                      height="15"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M5 12h14" />
+                      <path d="M12 5v14" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
         </>

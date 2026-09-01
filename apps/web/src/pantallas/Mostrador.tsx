@@ -6,7 +6,7 @@ import { api } from '../api.js';
 import { hidratarCatalogo, iniciarRefrescoPeriodico, type ProductoCache } from '../catalogo.js';
 import { encolarVenta, useCola, type CuerpoVenta } from '../cola.js';
 import { useEnLinea } from '../tema.js';
-import type { LineaCarrito, PagoNuevo, RespuestaVenta, Turno } from '../tipos.js';
+import type { ClienteResumen, LineaCarrito, PagoNuevo, RespuestaVenta, Turno } from '../tipos.js';
 import { clp, hora } from '../utils/formato.js';
 import { AccesoRapido } from '../components/AccesoRapido.js';
 import { BarraTotalFija } from '../components/BarraTotalFija.js';
@@ -37,6 +37,10 @@ export function Mostrador() {
   const [dialogo, setDialogo] = useState<DialogoAbierto>('ninguno');
   const [terminoSuelto, setTerminoSuelto] = useState('');
   const [claveVenta, setClaveVenta] = useState<string | null>(null);
+  // V15 (E4): cliente asociado a la venta en curso; el texto libre sin elegir
+  // a nadie viaja como clienteNombre, igual que en E1 (M3).
+  const [cliente, setCliente] = useState<ClienteResumen | null>(null);
+  const [nombreLibre, setNombreLibre] = useState('');
   const enLinea = useEnLinea();
   const cola = useCola();
   const [bannerEnviadas, setBannerEnviadas] = useState(0);
@@ -94,6 +98,8 @@ export function Mostrador() {
           setCarrito([]);
           setDescuento('');
           setClaveVenta(null);
+          setCliente(null);
+          setNombreLibre('');
         }
       }
     };
@@ -104,6 +110,8 @@ export function Mostrador() {
   const construirCuerpo = useCallback(
     (pagos: PagoNuevo[]): CuerpoVenta => ({
       idempotencyKey: claveVenta ?? ulid(),
+      clienteId: cliente?.id ?? null,
+      clienteNombre: cliente ? null : nombreLibre.trim() || null,
       descuento: descuento || 0,
       lineas: carrito.map((l) => ({
         productoId: l.productoId,
@@ -114,7 +122,7 @@ export function Mostrador() {
       })),
       pagos,
     }),
-    [claveVenta, descuento, carrito],
+    [claveVenta, cliente, nombreLibre, descuento, carrito],
   );
 
   const confirmarVenta = useCallback(
@@ -148,6 +156,8 @@ export function Mostrador() {
     setCarrito([]);
     setDescuento('');
     setClaveVenta(null);
+    setCliente(null);
+    setNombreLibre('');
     setDialogo('ninguno');
     setTimeout(() => document.getElementById('buscador')?.focus(), 0);
   }, []);
@@ -241,6 +251,11 @@ export function Mostrador() {
         abierto={dialogo === 'cobro'}
         total={total}
         enLinea={enLinea}
+        cliente={cliente}
+        nombreLibre={nombreLibre}
+        onElegirCliente={setCliente}
+        onQuitarCliente={() => setCliente(null)}
+        onNombreLibre={setNombreLibre}
         onCerrar={() => setDialogo('ninguno')}
         onConfirmar={confirmarVenta}
         onEncolar={encolar}

@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { entorno } from '../entorno.js';
 import { CANALES_WOO, importarCanal, sincronizarIncremental, type CanalWoo } from '../sync/importador.js';
+import { importarClientesCanal } from '../sync/clientes.js';
 
 export default async function rutasSync(app: FastifyInstance) {
   const soloAdmin = { preHandler: app.requiereRol('admin') };
@@ -20,6 +21,28 @@ export default async function rutasSync(app: FastifyInstance) {
       const dryRun = req.query.dryRun !== 'false';
       try {
         return await importarCanal(canalId, { dryRun });
+      } catch (e) {
+        req.log.error(e);
+        return reply
+          .code(502)
+          .send({ error: 'IMPORTACION_FALLIDA', detalle: (e as Error).message });
+      }
+    },
+  );
+
+  // Importación de clientes del canal — E4 §7.3 (C7). dryRun por defecto (S1):
+  // la corrida real solo VINCULA coincidencias por correo, jamás crea clientes.
+  app.post<{ Params: { canalId: string }; Querystring: { dryRun?: string } }>(
+    '/sync/:canalId/clientes',
+    soloAdmin,
+    async (req, reply) => {
+      const canalId = req.params.canalId as CanalWoo;
+      if (!CANALES_WOO.includes(canalId)) {
+        return reply.code(404).send({ error: 'CANAL_DESCONOCIDO' });
+      }
+      const dryRun = req.query.dryRun !== 'false';
+      try {
+        return await importarClientesCanal(canalId, { dryRun, usuarioId: req.user.sub });
       } catch (e) {
         req.log.error(e);
         return reply

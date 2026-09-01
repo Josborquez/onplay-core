@@ -8,7 +8,9 @@ export type MedioPago =
   | 'credito'
   | 'transferencia'
   | 'mercadopago'
-  | 'otro';
+  | 'otro'
+  // E4 §6.2: saldo del cliente; la ruta exige clienteId y valida el tope.
+  | 'monedero';
 
 export interface LineaEntrada {
   productoId: string | null;

@@ -53,6 +53,20 @@ async function main() {
     idPorSlug.set(slug, cat.id);
   }
 
+  // E4 §6.3 — producto semilla del monedero: la carga de saldo ES una venta
+  // de este producto. Sin stock, precio 0 (el monto lo pone la línea de venta).
+  await prisma.producto.upsert({
+    where: { sku: 'SRV-000001' },
+    update: { nombre: 'Carga de saldo', tipo: 'servicio', controlaStock: false },
+    create: {
+      sku: 'SRV-000001',
+      nombre: 'Carga de saldo',
+      tipo: 'servicio',
+      controlaStock: false,
+      precioVenta: 0,
+    },
+  });
+
   const anioActual = new Date().getUTCFullYear();
   await prisma.correlativo.upsert({
     where: { clave: 'venta' },
@@ -61,7 +75,7 @@ async function main() {
   });
 
   console.log(
-    `Semillas listas: ${CANALES.length} canales, ${CATEGORIAS.length} categorías, correlativo venta/${anioActual}.`,
+    `Semillas listas: ${CANALES.length} canales, ${CATEGORIAS.length} categorías, SRV-000001, correlativo venta/${anioActual}.`,
   );
 }
 

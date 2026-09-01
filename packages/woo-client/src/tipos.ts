@@ -36,6 +36,16 @@ export interface ProductoWoo {
   variations: number[];
 }
 
+/** Usuario de wc/v3/customers (E4 §7.3). El `id` ES el externoUserId de ClienteCanal. */
+export interface UsuarioWoo {
+  id: number;
+  email: string;
+  first_name: string;
+  last_name: string;
+  date_created: string;
+  billing?: { phone?: string; email?: string };
+}
+
 export interface AtributoVariacionWoo {
   name: string;
   option: string;
