@@ -1,0 +1,9 @@
+{
+  "name": "OnPlay Mostrador",
+  "short_name": "OnPlay",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#171021",
+  "theme_color": "#440084",
+  "icons": [{ "src": "/icono.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

@@ -1,0 +1,142 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tokens Cristal OnPlay (05-SDD §4.1). Todo color sale de aquí. */
+:root,
+[data-tema='claro'] {
+  --bg: #ffffff;
+  --bg2: #f5f3f9;
+  --bg3: #ffffff;
+  --barra: rgba(248, 246, 252, 0.72);
+  --barra-solida: #f8f6fc;
+  --lab: #1a1220;
+  --lab2: rgba(58, 45, 72, 0.8);
+  --lab3: rgba(58, 45, 72, 0.72);
+  --sep: rgba(58, 45, 72, 0.13);
+  --ac: #440084;
+  --ac-relleno: #440084;
+  --sobre-ac: #ffffff;
+  --ac-suave: rgba(68, 0, 132, 0.045);
+  --rosa: #ff3b77;
+  --ok: #1d7f3a;
+  --alerta: #b25000;
+  --peligro: #c4001a;
+  --sombra: 0 1px 2px rgba(26, 18, 32, 0.05), 0 6px 20px rgba(26, 18, 32, 0.05);
+}
+
+[data-tema='oscuro'] {
+  --bg: #0a0610;
+  --bg2: #171021;
+  --bg3: #211830;
+  --barra: rgba(23, 16, 33, 0.74);
+  --barra-solida: #171021;
+  --lab: #f4f0f8;
+  --lab2: rgba(236, 230, 245, 0.62);
+  --lab3: rgba(236, 230, 245, 0.55);
+  --sep: rgba(168, 138, 248, 0.16);
+  --ac: #b79cf9;
+  --ac-relleno: #7a3ad6;
+  --sobre-ac: #ffffff;
+  --ac-suave: rgba(168, 138, 248, 0.09);
+  --rosa: #ff5d8f;
+  --ok: #30d158;
+  --alerta: #ff9f0a;
+  --peligro: #ff453a;
+  --sombra: 0 1px 3px rgba(0, 0, 0, 0.35), 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+/* Escala fluida (05-SDD §4.2) */
+:root {
+  --t-total: clamp(30px, 3.3vw, 52px);
+  --t-tit: clamp(17px, 1.35vw, 22px);
+  --t-cuerpo: clamp(13.5px, 1vw, 16px);
+  --t-chico: clamp(11.5px, 0.82vw, 13px);
+  --t-rot: clamp(9.5px, 0.68vw, 11px);
+}
+
+html,
+body,
+#raiz {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg2);
+  color: var(--lab);
+  font-family: -apple-system, Inter, system-ui, sans-serif;
+  font-feature-settings: 'cv05', 'ss01';
+  font-size: var(--t-cuerpo);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Dinero y cantidades alineables (05-SDD §4.2) */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Los inputs nunca bajan de 16 px reales: iOS hace zoom al enfocar. */
+input,
+select,
+textarea {
+  font-size: max(16px, var(--t-cuerpo));
+}
+
+/* Foco visible siempre (05-SDD §4.3). Nunca outline:none sin reemplazo. */
+:focus-visible {
+  outline: none;
+  border-color: var(--ac);
+  box-shadow: 0 0 0 3.5px var(--ac-suave), 0 0 0 1.5px var(--ac);
+}
+
+/* Barra lateral translúcida con degradación (05-SDD §3.2) */
+.material-barra {
+  background: var(--barra-solida);
+}
+@supports (backdrop-filter: blur(22px)) {
+  .material-barra {
+    background: var(--barra);
+    backdrop-filter: saturate(180%) blur(22px);
+    -webkit-backdrop-filter: saturate(180%) blur(22px);
+  }
+}
+
+/* Transición del plegado (05-SDD §3.2) */
+.rejilla-app {
+  transition: grid-template-columns 320ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rejilla-app {
+    transition: none;
+  }
+  .pulso {
+    animation: none !important;
+  }
+}
+
+@keyframes pulso {
+  50% {
+    opacity: 0.35;
+  }
+}
+.pulso {
+  animation: pulso 1.2s ease-in-out infinite;
+}
+
+/* Resumen imprimible del cierre (05-SDD V4): blanco y negro. */
+@media print {
+  body {
+    background: #fff;
+    color: #000;
+  }
+  .no-imprimir {
+    display: none !important;
+  }
+  .solo-imprimir {
+    display: block !important;
+  }
+}
+.solo-imprimir {
+  display: none;
+}

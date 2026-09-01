@@ -1,0 +1,254 @@
+// prisma/schema.prisma
+// Esquema de la Etapa 1 — docs/02-SDD-etapa1-mostrador.md §4.1
+// Convención: camelCase en Prisma y en MySQL, sin @map (SDD general §6.2).
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextIndex", "fullTextSearch"]
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// Prisma exige un valor de enum por línea; no se pueden escribir en una sola.
+enum TipoProducto {
+  single
+  sellado
+  accesorio
+  snack
+  juego_mesa
+  juguete
+  evento
+  indeterminado
+  servicio // productos que no son mercadería: "Carga de saldo" (E4 §6.3)
+}
+
+enum RolUsuario {
+  vendedor
+  encargado
+  admin
+}
+
+enum EstadoVenta {
+  completada
+  anulada
+}
+
+enum MedioPago {
+  efectivo
+  debito
+  credito
+  transferencia
+  mercadopago
+  otro
+}
+
+enum EstadoTurno {
+  abierto
+  cerrado
+}
+
+enum AccionAuditoria {
+  crear
+  editar
+  anular
+  cambiar_precio
+  abrir_turno
+  cerrar_turno
+}
+
+model Canal {
+  id      String  @id // "onplay_cl" | "onplaygames_cl" | "tienda_fisica"
+  nombre  String
+  tipo    String // "woocommerce" | "fisico"
+  urlBase String?
+  activo  Boolean @default(true)
+
+  productos ProductoCanal[]
+  ventas    Venta[]
+}
+
+model Categoria {
+  id        String      @id @default(cuid())
+  nombre    String
+  slug      String      @unique
+  padreId   String?
+  padre     Categoria?  @relation("Jerarquia", fields: [padreId], references: [id])
+  hijos     Categoria[] @relation("Jerarquia")
+  productos Producto[]
+}
+
+model Producto {
+  id               String       @id @default(cuid())
+  sku              String       @unique // SKU maestro interno
+  nombre           String
+  tipo             TipoProducto @default(indeterminado)
+  juego            String? // campo libre: "magic" | "one_piece" | ...
+  categoriaId      String?
+  categoria        Categoria?   @relation(fields: [categoriaId], references: [id])
+  precioVenta      Int          @default(0) // CLP, sin decimales
+  controlaStock    Boolean      @default(false) // Principio P4
+  activo           Boolean      @default(true)
+  posibleDuplicado Boolean      @default(false) // marcado por el importador, §6.6
+  imagenUrl        String?      @db.Text
+  codigoBarras     String? // columna propia: se busca e indexa
+  cardNumber       String? // columna propia: se busca e indexa
+  atributos        Json? // resto de metadatos por tipo, §4.2
+  creadoEn         DateTime     @default(now())
+  actualizadoEn    DateTime     @updatedAt
+
+  canales ProductoCanal[]
+  lineas  VentaLinea[]
+
+  @@index([tipo, activo])
+  @@index([codigoBarras])
+  @@index([cardNumber])
+  @@fulltext([nombre])
+}
+
+model ProductoCanal {
+  id             String    @id @default(cuid())
+  productoId     String
+  producto       Producto  @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  canalId        String
+  canal          Canal     @relation(fields: [canalId], references: [id])
+  externoId      Int? // ID del post en WooCommerce
+  externoSku     String? // SKU tal cual está publicado
+  publicado      Boolean   @default(true)
+  precioCanal    Int? // null => hereda producto.precioVenta
+  sincronizadoEn DateTime?
+  hashUltimoSync String?
+
+  @@unique([canalId, externoId])
+  @@unique([canalId, externoSku])
+  @@unique([productoId, canalId])
+  @@index([productoId])
+}
+
+model Usuario {
+  id           String     @id @default(cuid())
+  nombre       String
+  email        String     @unique
+  passwordHash String
+  rol          RolUsuario @default(vendedor)
+  activo       Boolean    @default(true)
+  creadoEn     DateTime   @default(now())
+
+  turnos         TurnoCaja[]
+  ventas         Venta[]     @relation("VentasRegistradas")
+  ventasAnuladas Venta[]     @relation("VentasAnuladas")
+  auditorias     Auditoria[]
+}
+
+model TurnoCaja {
+  id             String      @id @default(cuid())
+  usuarioId      String
+  usuario        Usuario     @relation(fields: [usuarioId], references: [id])
+  estado         EstadoTurno @default(abierto)
+  abiertoEn      DateTime    @default(now())
+  montoApertura  Int
+  cerradoEn      DateTime?
+  montoDeclarado Int? // efectivo contado al cierre
+  montoEsperado  Int? // calculado por el sistema, §5.3
+  diferencia     Int? // declarado - esperado
+  notas          String?     @db.Text
+
+  ventas Venta[]
+
+  @@index([usuarioId, estado])
+}
+
+model Venta {
+  id              String      @id @default(cuid())
+  folio           String      @unique // "V-2026-00001", §5.5
+  idempotencyKey  String      @unique // ULID generado por el cliente, §5.4
+  canalId         String      @default("tienda_fisica")
+  canal           Canal       @relation(fields: [canalId], references: [id])
+  turnoCajaId     String
+  turnoCaja       TurnoCaja   @relation(fields: [turnoCajaId], references: [id])
+  usuarioId       String
+  usuario         Usuario     @relation("VentasRegistradas", fields: [usuarioId], references: [id])
+  clienteNombre   String? // texto libre en E1; entidad Cliente en E4
+  subtotal        Int
+  descuento       Int         @default(0)
+  total           Int
+  estado          EstadoVenta @default(completada)
+  motivoAnulacion String?     @db.Text
+  anuladaEn       DateTime?
+  anuladaPorId    String?
+  anuladaPor      Usuario?    @relation("VentasAnuladas", fields: [anuladaPorId], references: [id])
+  creadoEn        DateTime    @default(now())
+
+  lineas VentaLinea[]
+  pagos  Pago[]
+
+  @@index([creadoEn])
+  @@index([turnoCajaId])
+}
+
+model VentaLinea {
+  id             String    @id @default(cuid())
+  ventaId        String
+  venta          Venta     @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  productoId     String? // null => ítem suelto no catalogado
+  producto       Producto? @relation(fields: [productoId], references: [id])
+  descripcion    String // congelada al momento de la venta
+  cantidad       Int
+  precioUnitario Int
+  descuentoLinea Int       @default(0)
+  totalLinea     Int
+
+  @@index([ventaId])
+  @@index([productoId])
+}
+
+model Pago {
+  id            String    @id @default(cuid())
+  ventaId       String
+  venta         Venta     @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  medio         MedioPago
+  monto         Int // importe IMPUTADO a la venta
+  montoRecibido Int? // solo efectivo, para el vuelto
+  referencia    String? // nº de operación o voucher. NUNCA dígitos de tarjeta
+
+  @@index([ventaId])
+}
+
+model Correlativo {
+  clave  String @id // "venta"
+  anio   Int
+  ultimo Int    @default(0)
+}
+
+// Bitácora de la máquina: lo que hace el sync contra WooCommerce.
+model SyncLog {
+  id         String   @id @default(cuid())
+  canalId    String? // sin relación: el log sobrevive a borrados
+  operacion  String // "importar" | "incremental" | ...
+  productoId String?
+  resultado  String // "creado" | "actualizado" | "omitido" | "error"
+  resuelto   Boolean  @default(false) // para errores que requieren revisión manual
+  detalle    String?  @db.Text
+  creadoEn   DateTime @default(now())
+
+  @@index([canalId, creadoEn])
+  @@index([resultado, resuelto])
+}
+
+// Bitácora de las personas: lo que hace un usuario. Tabla DISTINTA de SyncLog.
+model Auditoria {
+  id            String          @id @default(cuid())
+  usuarioId     String
+  usuario       Usuario         @relation(fields: [usuarioId], references: [id])
+  entidad       String // "producto" | "venta" | "turno_caja" | "usuario"
+  entidadId     String
+  accion        AccionAuditoria
+  valorAnterior Json?
+  valorNuevo    Json?
+  creadoEn      DateTime        @default(now())
+
+  @@index([entidad, entidadId])
+  @@index([usuarioId, creadoEn])
+}

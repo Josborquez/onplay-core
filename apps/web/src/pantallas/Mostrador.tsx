@@ -1,0 +1,285 @@
+// V2 — Mostrador (05-SDD §7.1): buscador + accesos rápidos + panel de venta.
+// Exige turno abierto (V1). Atajos SOLO con teclas de función (F1/F2/F8).
+import { useCallback, useEffect, useState } from 'react';
+import { ulid } from 'ulid';
+import { api } from '../api.js';
+import { hidratarCatalogo, iniciarRefrescoPeriodico, type ProductoCache } from '../catalogo.js';
+import { encolarVenta, useCola, type CuerpoVenta } from '../cola.js';
+import { useEnLinea } from '../tema.js';
+import type { LineaCarrito, PagoNuevo, RespuestaVenta, Turno } from '../tipos.js';
+import { clp, hora } from '../utils/formato.js';
+import { AccesoRapido } from '../components/AccesoRapido.js';
+import { BarraTotalFija } from '../components/BarraTotalFija.js';
+import { Buscador } from '../components/Buscador.js';
+import { DialogoApertura } from '../components/DialogoApertura.js';
+import { DialogoCierre } from '../components/DialogoCierre.js';
+import { DialogoCobro } from '../components/DialogoCobro.js';
+import { DialogoItemSuelto } from '../components/DialogoItemSuelto.js';
+import { PanelVenta, motivoNoCobrable } from '../components/PanelVenta.js';
+import { Banner, Boton, Dialogo } from '../components/base.js';
+
+type DialogoAbierto = 'ninguno' | 'cobro' | 'suelto' | 'cierre' | 'ayuda';
+
+const ATAJOS: [string, string][] = [
+  ['F1', 'Esta lista de atajos'],
+  ['F2', 'Abrir el cobro'],
+  ['F3', 'Plegar o desplegar la barra lateral'],
+  ['F4', 'Ir al backoffice (encargado o superior)'],
+  ['F8', 'Vaciar el carrito'],
+  ['Esc', 'Limpiar búsqueda · cerrar diálogo'],
+  ['↓ ↑ Enter', 'Navegar y agregar resultados'],
+];
+
+export function Mostrador() {
+  const [turno, setTurno] = useState<Turno | null | 'cargando'>('cargando');
+  const [carrito, setCarrito] = useState<LineaCarrito[]>([]);
+  const [descuento, setDescuento] = useState<number | ''>('');
+  const [dialogo, setDialogo] = useState<DialogoAbierto>('ninguno');
+  const [terminoSuelto, setTerminoSuelto] = useState('');
+  const [claveVenta, setClaveVenta] = useState<string | null>(null);
+  const enLinea = useEnLinea();
+  const cola = useCola();
+  const [bannerEnviadas, setBannerEnviadas] = useState(0);
+
+  useEffect(() => {
+    void hidratarCatalogo();
+    const detener = iniciarRefrescoPeriodico();
+    void api<Turno | null>('/turnos/actual')
+      .then(setTurno)
+      .catch(() => setTurno(null));
+    return detener;
+  }, []);
+
+  const totalLineas = carrito.reduce((s, l) => s + l.cantidad * l.precioUnitario, 0);
+  const total = Math.max(0, totalLineas - (descuento || 0));
+  const cobrable = motivoNoCobrable(carrito, descuento) === null;
+
+  const agregarProducto = useCallback((p: ProductoCache) => {
+    setCarrito((prev) => {
+      const existente = prev.find((l) => l.productoId === p.id);
+      if (existente) {
+        return prev.map((l) => (l.clave === existente.clave ? { ...l, cantidad: l.cantidad + 1 } : l));
+      }
+      return [
+        ...prev,
+        {
+          clave: ulid(),
+          productoId: p.id,
+          descripcion: p.nombre,
+          cantidad: 1,
+          precioUnitario: p.precioVenta,
+          precioCatalogo: p.precioVenta,
+        },
+      ];
+    });
+  }, []);
+
+  const abrirCobro = useCallback(() => {
+    setClaveVenta((k) => k ?? ulid()); // estable ante reintentos: criterio 9 de 02-SDD
+    setDialogo('cobro');
+  }, []);
+
+  // Atajos globales: solo teclas de función (05-SDD V2).
+  useEffect(() => {
+    const alTeclear = (e: KeyboardEvent) => {
+      if (e.key === 'F1') {
+        e.preventDefault();
+        setDialogo((d) => (d === 'ninguno' ? 'ayuda' : d));
+      } else if (e.key === 'F2') {
+        e.preventDefault();
+        if (dialogo === 'ninguno' && cobrable) abrirCobro();
+      } else if (e.key === 'F8') {
+        e.preventDefault();
+        if (dialogo === 'ninguno' && carrito.length > 0 && window.confirm('¿Vaciar el carrito?')) {
+          setCarrito([]);
+          setDescuento('');
+          setClaveVenta(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', alTeclear);
+    return () => window.removeEventListener('keydown', alTeclear);
+  }, [dialogo, cobrable, carrito.length, abrirCobro]);
+
+  const construirCuerpo = useCallback(
+    (pagos: PagoNuevo[]): CuerpoVenta => ({
+      idempotencyKey: claveVenta ?? ulid(),
+      descuento: descuento || 0,
+      lineas: carrito.map((l) => ({
+        productoId: l.productoId,
+        descripcion: l.descripcion,
+        cantidad: l.cantidad,
+        precioUnitario: l.precioUnitario,
+        descuentoLinea: 0, // existe en el contrato; la Etapa 1 no lo expone
+      })),
+      pagos,
+    }),
+    [claveVenta, descuento, carrito],
+  );
+
+  const confirmarVenta = useCallback(
+    async (pagos: PagoNuevo[]) => {
+      const r = await api<RespuestaVenta>('/ventas', {
+        method: 'POST',
+        body: JSON.stringify(construirCuerpo(pagos)),
+      });
+      return { folio: r.venta.folio, advertencias: r.advertencias.length };
+    },
+    [construirCuerpo],
+  );
+
+  // F10: sin conexión la venta se guarda en IndexedDB con su idempotencyKey.
+  const encolar = useCallback(
+    (pagos: PagoNuevo[]) => void encolarVenta(construirCuerpo(pagos)),
+    [construirCuerpo],
+  );
+
+  // Al vaciarse la cola: banner ok 4 segundos; si algo falló, banner peligro
+  // que no se cierra solo (05-SDD §8.1).
+  useEffect(() => {
+    const r = cola.ultimoResultado;
+    if (!r || r.enviadas === 0) return;
+    setBannerEnviadas(r.enviadas);
+    const id = setTimeout(() => setBannerEnviadas(0), 4000);
+    return () => clearTimeout(id);
+  }, [cola.ultimoResultado]);
+
+  const ventaLista = useCallback(() => {
+    setCarrito([]);
+    setDescuento('');
+    setClaveVenta(null);
+    setDialogo('ninguno');
+    setTimeout(() => document.getElementById('buscador')?.focus(), 0);
+  }, []);
+
+  if (turno === 'cargando') {
+    return <p className="p-8 text-center text-cuerpo text-lab3">Cargando…</p>;
+  }
+  if (!turno) {
+    return <DialogoApertura onAbierto={setTurno} />;
+  }
+
+  const propsPanel = {
+    lineas: carrito,
+    descuento,
+    onDescuento: setDescuento,
+    onCantidad: (clave: string, cantidad: number) =>
+      setCarrito((prev) => prev.map((l) => (l.clave === clave ? { ...l, cantidad } : l))),
+    onPrecio: (clave: string, precio: number) =>
+      setCarrito((prev) => prev.map((l) => (l.clave === clave ? { ...l, precioUnitario: precio } : l))),
+    onEliminar: (clave: string) => setCarrito((prev) => prev.filter((l) => l.clave !== clave)),
+    onCobrar: abrirCobro,
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col p-4">
+      <header className="no-imprimir mb-3 flex items-center justify-between gap-3">
+        <p className="text-chico text-lab2">
+          Turno abierto a las {hora(turno.abiertoEn)} · apertura {clp(turno.montoApertura)}
+        </p>
+        <div className="w-[160px]">
+          <Boton onClick={() => setDialogo('cierre')}>Cerrar caja</Boton>
+        </div>
+      </header>
+
+      {bannerEnviadas > 0 ? (
+        <div className="no-imprimir mb-3">
+          <Banner tono="ok">
+            Se enviaron {bannerEnviadas} venta{bannerEnviadas > 1 ? 's' : ''} pendiente
+            {bannerEnviadas > 1 ? 's' : ''}.
+          </Banner>
+        </div>
+      ) : null}
+      {cola.ultimoResultado && cola.ultimoResultado.fallidas.length > 0 ? (
+        <div className="no-imprimir mb-3">
+          <Banner tono="peligro">
+            {cola.ultimoResultado.fallidas.length > 1
+              ? `${cola.ultimoResultado.fallidas.length} ventas pendientes no se pudieron enviar.`
+              : '1 venta pendiente no se pudo enviar.'}
+            <details className="mt-1">
+              <summary className="cursor-pointer underline">Ver detalle</summary>
+              <ul className="mt-1 flex flex-col gap-1">
+                {cola.ultimoResultado.fallidas.map((f) => (
+                  <li key={f.idempotencyKey} className="font-mono text-chico">
+                    {f.idempotencyKey.slice(-6)}: {f.detalle}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </Banner>
+        </div>
+      ) : null}
+
+      <div className="no-imprimir flex min-h-0 flex-1 gap-4">
+        <div className="min-w-0 flex-1 overflow-y-auto pb-[96px] lg:pb-0">
+          <Buscador
+            bloqueado={dialogo !== 'ninguno'}
+            cantidadEnCarrito={(id) => carrito.find((l) => l.productoId === id)?.cantidad ?? 0}
+            onAgregar={agregarProducto}
+            onItemSuelto={(termino) => {
+              setTerminoSuelto(termino);
+              setDialogo('suelto');
+            }}
+          />
+          <div className="mt-4">
+            <AccesoRapido onAgregar={agregarProducto} />
+          </div>
+          <div className="mt-4 lg:hidden">
+            <PanelVenta {...propsPanel} />
+          </div>
+        </div>
+        <aside className="hidden w-[344px] shrink-0 lg:block">
+          <PanelVenta {...propsPanel} />
+        </aside>
+      </div>
+
+      {carrito.length > 0 ? (
+        <BarraTotalFija total={total} deshabilitado={!cobrable} onCobrar={abrirCobro} />
+      ) : null}
+
+      <DialogoCobro
+        abierto={dialogo === 'cobro'}
+        total={total}
+        enLinea={enLinea}
+        onCerrar={() => setDialogo('ninguno')}
+        onConfirmar={confirmarVenta}
+        onEncolar={encolar}
+        onListo={ventaLista}
+      />
+      <DialogoItemSuelto
+        abierto={dialogo === 'suelto'}
+        terminoInicial={terminoSuelto}
+        onCerrar={() => setDialogo('ninguno')}
+        onAgregar={(descripcion, precio) => {
+          setCarrito((prev) => [
+            ...prev,
+            { clave: ulid(), productoId: null, descripcion, cantidad: 1, precioUnitario: precio, precioCatalogo: null },
+          ]);
+          setDialogo('ninguno');
+        }}
+      />
+      <DialogoCierre
+        abierto={dialogo === 'cierre'}
+        turno={turno}
+        onCerrar={() => setDialogo('ninguno')}
+        onCerrado={() => {
+          setDialogo('ninguno');
+          setTurno(null);
+          setCarrito([]);
+          setDescuento('');
+          setClaveVenta(null);
+        }}
+      />
+      <Dialogo abierto={dialogo === 'ayuda'} titulo="Atajos de teclado" onCerrar={() => setDialogo('ninguno')} ancho={420}>
+        <ul className="flex flex-col gap-2">
+          {ATAJOS.map(([tecla, accion]) => (
+            <li key={tecla} className="flex items-center justify-between text-cuerpo">
+              <span className="rounded border border-sep bg-bg3 px-2 py-0.5 font-mono text-chico text-lab">{tecla}</span>
+              <span className="text-lab2">{accion}</span>
+            </li>
+          ))}
+        </ul>
+      </Dialogo>
+    </div>
+  );
+}

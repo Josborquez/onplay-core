@@ -1,0 +1,55 @@
+// SKU maestro — 02-SDD §6.4 y SDD general §7.1.
+// La reserva del correlativo en base de datos es responsabilidad del llamador;
+// aquí solo viven las reglas puras (testeables).
+
+export type TipoProducto =
+  | 'single'
+  | 'sellado'
+  | 'accesorio'
+  | 'snack'
+  | 'juego_mesa'
+  | 'juguete'
+  | 'evento'
+  | 'indeterminado'
+  | 'servicio';
+
+export const PREFIJO_POR_TIPO: Record<TipoProducto, string> = {
+  sellado: 'SLD',
+  accesorio: 'ACC',
+  snack: 'SNK',
+  juego_mesa: 'JDM',
+  juguete: 'JGT',
+  evento: 'EVT',
+  servicio: 'SRV',
+  indeterminado: 'IND',
+  // Un single sin SKU externo reconocible no tiene identificador natural:
+  // cae al correlativo de indeterminados (§6.2, "Productos sin tipo determinable").
+  single: 'IND',
+};
+
+const PATRON_MTG = /^([A-Z0-9]{2,5})-(\d+)-(NM|LP|MP|HP|DMG)-([A-Z]{2})$/;
+
+/**
+ * SKU maestro derivable directamente del SKU externo (casos 1 y 2 de §6.4).
+ * Devuelve null si no hay forma reconocible: el llamador debe reservar correlativo.
+ */
+export function skuMaestroDesdeExterno(externoSku: string | null | undefined): string | null {
+  if (!externoSku) return null;
+  if (externoSku.startsWith('OP-')) return `OPT-${externoSku.slice(3)}`;
+  const mtg = externoSku.match(PATRON_MTG);
+  if (mtg) {
+    const [, set, num, cond, idioma] = mtg;
+    return `MTG-${set}-${num!.padStart(3, '0')}-${cond}-${idioma}`;
+  }
+  return null;
+}
+
+/** Caso 3 de §6.4: prefijo por tipo + correlativo. EVT lleva el año (§7.1). */
+export function formatearSkuCorrelativo(tipo: TipoProducto, numero: number, anio?: number): string {
+  const prefijo = PREFIJO_POR_TIPO[tipo];
+  if (prefijo === 'EVT') {
+    const a = anio ?? new Date().getUTCFullYear();
+    return `EVT-${a}-${String(numero).padStart(4, '0')}`;
+  }
+  return `${prefijo}-${String(numero).padStart(6, '0')}`;
+}
