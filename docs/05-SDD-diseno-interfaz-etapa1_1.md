@@ -591,7 +591,7 @@ Siete puntos que este diseño necesita y que `02` §5 no define. La regla de alc
 | **H2** | Endpoint de auditoría | `02` §8 lista la pantalla y §4.1 modela la tabla; no hay forma de leerla | `GET /auditoria` con filtros `entidad`, `entidadId`, `usuarioId`, `desde`, `hasta` (encargado) |
 | **H3** | Filtro por vendedor en ventas | Un encargado necesita responder "¿qué vendió Carla ayer?" | Añadir `usuarioId` a `GET /ventas` |
 | **H4** | Filtro por canal en productos | `02` §8 promete filtro por canal; §5.2 no lo acepta | Añadir `canalId` a `GET /productos` |
-| **H5** | Totales en respuestas paginadas | Ni productos ni ventas puede mostrar un total | `total` en `GET /productos`; `total` y `sumaTotal` en `GET /ventas` |
+| **H5** | Totales en respuestas paginadas | Ni productos ni ventas puede mostrar un total | `total` en `GET /productos`; `total` y `sumaTotal` en `GET /ventas` · **Resuelto para productos el 2026-09-02 (R-009, `08-bitacora-revision.md`): `GET /productos` devuelve `total` y acepta `pagina`; V5 pagina por número de página** |
 | **H6** | Descartar un par de duplicados | `02` §8 dice "fusionar o descartar"; §5.2 solo define fusionar | `PATCH /productos/:id { posibleDuplicado:false }` en ambos, auditado |
 | **H7** | Dónde vive el refresh token | §5.1 define el endpoint, no el almacenamiento. 30 días en `localStorage` contradice S3 | Cookie `httpOnly` + `SameSite=Strict` emitida en el login |
 

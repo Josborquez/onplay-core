@@ -1,107 +1,320 @@
-// V5 — Productos (05-SDD §7): tabla paginada por cursor, 50 por página.
-// NUNCA se carga el catálogo completo. Sin contador total (§14 H5), sin filtro
-// por canal (§14 H4); la columna Canales sale de GET /productos/:id al expandir.
-import { useCallback, useEffect, useRef, useState } from 'react';
+// V5 — Productos (05-SDD §7, ajustado por R-009): tabla o grilla paginadas por número de
+// página, 50 por página, con total (§14 H5 resuelto en la API). NUNCA se carga el catálogo
+// completo. Sin filtro por canal (§14 H4). Clic en un producto → modal con la ficha completa
+// (imagen, datos, atributos, canales); el precio se cambia desde ahí o desde la fila.
+// Stock: en E1/E4 solo existe `controlaStock`; la cantidad por ubicación llega en E2.
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, ErrorApi } from '../../api.js';
 import { categorias } from '../../catalogo.js';
 import { useEnLinea } from '../../tema.js';
 import { ETIQUETA_TIPO, type ProductoAdmin, type TipoProducto } from '../../tipos.js';
 import { clp, fecha } from '../../utils/formato.js';
-import { Banner, Boton, Campo, CampoMonto, Cargando, Dialogo, Insignia, Segmentado, Vacio } from '../../components/base.js';
-import { aplanarCategorias, Encabezado, Selecto, type OpcionCategoria } from './util.js';
+import {
+  Banner,
+  Boton,
+  Campo,
+  CampoMonto,
+  Cargando,
+  ConmutadorVista,
+  Dialogo,
+  Insignia,
+  Segmentado,
+  Vacio,
+  type Vista,
+} from '../../components/base.js';
+import { aplanarCategorias, Encabezado, Paginacion, Selecto, type OpcionCategoria } from './util.js';
+
+interface CanalProducto {
+  canalId: string;
+  externoId: number | null;
+  externoSku: string | null;
+  publicado: boolean;
+  precioCanal: number | null;
+  sincronizadoEn: string | null;
+}
 
 interface DetalleProducto extends ProductoAdmin {
-  canales: { canalId: string; externoSku: string | null; precioCanal: number | null; sincronizadoEn: string | null }[];
+  atributos: Record<string, string> | null;
+  categoria: { id: string; nombre: string } | null;
+  canales: CanalProducto[];
+  creadoEn: string;
 }
+
+interface RespuestaProductos {
+  productos: ProductoAdmin[];
+  total: number;
+  pagina: number;
+  porPagina: number;
+}
+
+const POR_PAGINA = 50;
+const CLAVE_VISTA = 'onplay.productos-vista';
 
 const OPCIONES_TIPO = (Object.keys(ETIQUETA_TIPO) as TipoProducto[]).map((t) => ({
   valor: t,
   etiqueta: ETIQUETA_TIPO[t],
 }));
 
+/** Etiquetas en castellano de las claves conocidas de `atributos` (02-SDD §4.2 + R-003). */
+const ETIQUETA_ATRIBUTO: Record<string, string> = {
+  variante: 'Variante',
+  padreExternoId: 'Producto padre en el canal',
+  set_code: 'Set',
+  set_full_code: 'Set (código completo)',
+  rarity: 'Rareza',
+  rarity_code: 'Rareza (código)',
+  is_foil: 'Foil',
+  is_alt_art: 'Arte alternativo',
+  color: 'Color',
+  card_type: 'Tipo de carta',
+  condicion: 'Condición',
+  idioma: 'Idioma',
+  scryfall_id: 'Scryfall',
+  formato: 'Formato',
+  sabor: 'Sabor',
+};
+
+function vistaGuardada(): Vista {
+  try {
+    return localStorage.getItem(CLAVE_VISTA) === 'grilla' ? 'grilla' : 'lista';
+  } catch {
+    return 'lista';
+  }
+}
+
+/* ---------- piezas visuales ---------- */
+
+function Imagen({ src, alt, clase }: { src: string | null; alt: string; clase: string }) {
+  const [rota, setRota] = useState(false);
+  useEffect(() => setRota(false), [src]);
+  if (!src || rota) {
+    return (
+      <div aria-hidden="true" className={`flex items-center justify-center bg-bg2 text-lab3 ${clase}`}>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <circle cx="9" cy="9" r="2" />
+          <path d="m21 15-5-5L5 21" />
+        </svg>
+      </div>
+    );
+  }
+  return <img src={src} alt={alt} loading="lazy" decoding="async" onError={() => setRota(true)} className={`bg-bg2 object-cover ${clase}`} />;
+}
+
+function TextoStock({ p }: { p: ProductoAdmin }) {
+  // E1/E4: solo se sabe si controla stock. La cantidad por ubicación es de E2.
+  return p.controlaStock ? (
+    <span className="text-lab2" title="Controla stock. La cantidad por ubicación llega en la Etapa 2.">
+      Controla · cant. E2
+    </span>
+  ) : (
+    <span className="text-lab3" title="No controla stock (P4). Se vende sin descontar cantidad.">
+      No controla
+    </span>
+  );
+}
+
+function Insignias({ p }: { p: ProductoAdmin }) {
+  return (
+    <>
+      {p.posibleDuplicado ? <Insignia tono="alerta">⚠ posible duplicado</Insignia> : null}
+      {!p.activo ? <Insignia>inactivo</Insignia> : null}
+    </>
+  );
+}
+
 function FilaProducto({
-  producto,
+  producto: p,
+  onAbrir,
   onCambiarPrecio,
 }: {
   producto: ProductoAdmin;
+  onAbrir: (p: ProductoAdmin) => void;
   onCambiarPrecio: (p: ProductoAdmin) => void;
 }) {
-  const [detalle, setDetalle] = useState<DetalleProducto | 'cargando' | null>(null);
-  const abierta = detalle !== null;
-
-  const conmutar = async () => {
-    if (abierta) {
-      setDetalle(null);
-      return;
-    }
-    setDetalle('cargando');
-    try {
-      setDetalle(await api<DetalleProducto>(`/productos/${producto.id}`));
-    } catch {
-      setDetalle(null);
-    }
-  };
-
   return (
-    <li>
-      <div className="flex min-h-fila w-full items-center gap-3 px-4 py-2">
-        <button
-          type="button"
-          onClick={() => void conmutar()}
-          aria-expanded={abierta}
-          className="min-w-0 flex-1 text-left"
-        >
+    <li className="flex min-h-fila w-full items-center gap-3 px-3 py-2">
+      <button
+        type="button"
+        onClick={() => onAbrir(p)}
+        aria-label={`Ver ficha de ${p.nombre}`}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+      >
+        <Imagen src={p.imagenUrl} alt="" clase="h-[40px] w-[40px] shrink-0 rounded border border-sep" />
+        <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
-            <span className={`truncate text-cuerpo ${producto.activo ? 'text-lab' : 'text-lab3'}`}>
-              {producto.nombre}
-            </span>
-            {producto.posibleDuplicado ? <Insignia tono="alerta">⚠ posible duplicado</Insignia> : null}
-            {!producto.activo ? <Insignia>inactivo</Insignia> : null}
+            <span className={`truncate text-cuerpo ${p.activo ? 'text-lab' : 'text-lab3'}`}>{p.nombre}</span>
+            <Insignias p={p} />
           </span>
           <span className="block font-mono text-chico text-lab3">
-            {producto.sku}
-            {producto.cardNumber ? ` · ${producto.cardNumber}` : ''}
+            {p.sku}
+            {p.cardNumber ? ` · ${p.cardNumber}` : ''}
+            {p.codigoBarras ? ` · ${p.codigoBarras}` : ''}
           </span>
-        </button>
-        <span className="hidden w-[112px] shrink-0 text-chico text-lab2 sm:block">{ETIQUETA_TIPO[producto.tipo]}</span>
-        <button
-          type="button"
-          onClick={() => onCambiarPrecio(producto)}
-          className="num w-[96px] shrink-0 rounded px-1 text-right text-cuerpo text-lab underline decoration-dotted underline-offset-4"
-          aria-label={`Cambiar el precio de ${producto.nombre}`}
-        >
-          {clp(producto.precioVenta)}
-        </button>
-      </div>
-      {abierta ? (
-        <div className="border-t border-sep bg-bg2 px-4 py-3 text-chico text-lab2">
-          {detalle === 'cargando' ? (
-            <Cargando texto="Cargando canales…" />
-          ) : (
-            <>
-              <p className="mb-1 text-lab3">Canales</p>
-              {detalle.canales.length === 0 ? (
-                <p>Solo en la tienda física: no está publicado en ningún canal.</p>
-              ) : (
-                <ul className="flex flex-col gap-1">
-                  {detalle.canales.map((c) => (
-                    <li key={c.canalId} className="flex flex-wrap items-center gap-2">
-                      <Insignia>{c.canalId}</Insignia>
-                      {c.externoSku ? <span className="font-mono">{c.externoSku}</span> : null}
-                      {c.precioCanal !== null ? <span className="num">{clp(c.precioCanal)}</span> : null}
-                      {c.sincronizadoEn ? <span className="text-lab3">sync {fecha(c.sincronizadoEn)}</span> : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-        </div>
-      ) : null}
+        </span>
+      </button>
+      <span className="hidden w-[112px] shrink-0 text-chico text-lab2 sm:block">{ETIQUETA_TIPO[p.tipo]}</span>
+      <span className="hidden w-[128px] shrink-0 text-chico md:block">
+        <TextoStock p={p} />
+      </span>
+      <button
+        type="button"
+        onClick={() => onCambiarPrecio(p)}
+        className="num w-[96px] shrink-0 rounded px-1 text-right text-cuerpo text-lab underline decoration-dotted underline-offset-4"
+        aria-label={`Cambiar el precio de ${p.nombre}`}
+      >
+        {clp(p.precioVenta)}
+      </button>
     </li>
   );
 }
+
+function TarjetaProducto({ producto: p, onAbrir }: { producto: ProductoAdmin; onAbrir: (p: ProductoAdmin) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onAbrir(p)}
+      aria-label={`Ver ficha de ${p.nombre}`}
+      className="flex flex-col overflow-hidden rounded-tarjeta border border-sep bg-bg text-left transition-all active:scale-[0.98]"
+    >
+      <Imagen src={p.imagenUrl} alt="" clase="aspect-square w-full border-b border-sep" />
+      <span className="flex flex-1 flex-col gap-1 p-2">
+        <span className={`text-cuerpo font-medium leading-tight line-clamp-2 ${p.activo ? 'text-lab' : 'text-lab3'}`}>{p.nombre}</span>
+        <span className="font-mono text-chico text-lab3">{p.sku}</span>
+        <span className="mt-auto flex items-center justify-between gap-1">
+          <span className="num font-semibold text-cuerpo text-lab">{clp(p.precioVenta)}</span>
+          <span className="flex gap-1">
+            <Insignias p={p} />
+          </span>
+        </span>
+      </span>
+    </button>
+  );
+}
+
+/* ---------- modal de detalle ---------- */
+
+function Dato({ etiqueta, children }: { etiqueta: string; children: ReactNode }) {
+  return (
+    <div className="flex justify-between gap-3 border-b border-sep py-1 last:border-b-0">
+      <dt className="shrink-0 text-chico text-lab3">{etiqueta}</dt>
+      <dd className="min-w-0 text-right text-chico text-lab">{children}</dd>
+    </div>
+  );
+}
+
+function DetalleProductoModal({
+  producto,
+  categoriaNombre,
+  onCerrar,
+  onCambiarPrecio,
+}: {
+  producto: ProductoAdmin | null;
+  categoriaNombre: (id: string | null) => string;
+  onCerrar: () => void;
+  onCambiarPrecio: (p: ProductoAdmin) => void;
+}) {
+  const [detalle, setDetalle] = useState<DetalleProducto | null>(null);
+  const [fallo, setFallo] = useState(false);
+
+  useEffect(() => {
+    setDetalle(null);
+    setFallo(false);
+    if (!producto) return;
+    let vivo = true;
+    api<DetalleProducto>(`/productos/${producto.id}`)
+      .then((d) => {
+        if (vivo) setDetalle(d);
+      })
+      .catch(() => {
+        if (vivo) setFallo(true);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [producto]);
+
+  const p = detalle ?? producto;
+  const atributos = Object.entries(detalle?.atributos ?? {});
+
+  return (
+    <Dialogo abierto={producto !== null} titulo="Ficha del producto" onCerrar={onCerrar} ancho={720}>
+      {p ? (
+        <div className="flex flex-col gap-4 sm:flex-row">
+          <Imagen src={p.imagenUrl} alt={p.nombre} clase="aspect-square w-full shrink-0 rounded-tarjeta border border-sep sm:w-[240px]" />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-cuerpo font-semibold text-lab">{p.nombre}</h2>
+              <Insignias p={p} />
+            </div>
+            <p className="mt-1 font-mono text-chico text-lab3">{p.sku}</p>
+
+            <div className="mt-3 flex items-center justify-between rounded-campo bg-bg2 px-3 py-2">
+              <span className="text-chico text-lab2">Precio de venta</span>
+              <span className="flex items-center gap-2">
+                <span className="num text-tit text-lab">{clp(p.precioVenta)}</span>
+                <Boton clase="w-[112px]" onClick={() => onCambiarPrecio(p)}>
+                  Cambiar
+                </Boton>
+              </span>
+            </div>
+
+            <dl className="mt-3">
+              <Dato etiqueta="Tipo">{ETIQUETA_TIPO[p.tipo]}</Dato>
+              {p.juego ? <Dato etiqueta="Juego">{p.juego}</Dato> : null}
+              <Dato etiqueta="Categoría">{detalle?.categoria?.nombre ?? categoriaNombre(p.categoriaId)}</Dato>
+              <Dato etiqueta="Stock">
+                <TextoStock p={p} />
+              </Dato>
+              {p.codigoBarras ? (
+                <Dato etiqueta="Código de barras">
+                  <span className="font-mono">{p.codigoBarras}</span>
+                </Dato>
+              ) : null}
+              {p.cardNumber ? (
+                <Dato etiqueta="Nº de carta">
+                  <span className="font-mono">{p.cardNumber}</span>
+                </Dato>
+              ) : null}
+              {atributos.map(([clave, valor]) => (
+                <Dato key={clave} etiqueta={ETIQUETA_ATRIBUTO[clave] ?? clave}>
+                  {String(valor)}
+                </Dato>
+              ))}
+              <Dato etiqueta="Estado">{p.activo ? 'Activo' : 'Inactivo'}</Dato>
+              <Dato etiqueta="Actualizado">{fecha(p.actualizadoEn)}</Dato>
+            </dl>
+
+            <p className="mb-1 mt-3 text-chico text-lab3">Canales</p>
+            {fallo ? (
+              <p className="text-chico text-peligro">No se pudo cargar el detalle. Revisa la conexión.</p>
+            ) : !detalle ? (
+              <Cargando texto="Cargando canales…" />
+            ) : detalle.canales.length === 0 ? (
+              <p className="text-chico text-lab2">Solo en la tienda física: no está publicado en ningún canal.</p>
+            ) : (
+              <ul className="flex flex-col gap-1">
+                {detalle.canales.map((c) => (
+                  <li key={c.canalId} className="flex flex-wrap items-center gap-2 text-chico text-lab2">
+                    <Insignia tono={c.publicado ? 'ok' : 'neutro'}>{c.canalId}</Insignia>
+                    {c.externoSku ? <span className="font-mono">{c.externoSku}</span> : null}
+                    {c.externoId !== null ? <span className="text-lab3">id {c.externoId}</span> : null}
+                    {c.precioCanal !== null ? <span className="num">{clp(c.precioCanal)}</span> : null}
+                    {!c.publicado ? <span className="text-lab3">despublicado</span> : null}
+                    {c.sincronizadoEn ? <span className="text-lab3">sync {fecha(c.sincronizadoEn)}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </Dialogo>
+  );
+}
+
+/* ---------- pantalla ---------- */
 
 export function Productos() {
   const [parametros] = useSearchParams();
@@ -111,10 +324,11 @@ export function Productos() {
   const [soloDuplicados, setSoloDuplicados] = useState<'si' | null>(null);
   const [actividad, setActividad] = useState<'activos' | 'inactivos' | null>(null);
   const [opcionesCategoria, setOpcionesCategoria] = useState<OpcionCategoria[]>([]);
-  const [lista, setLista] = useState<ProductoAdmin[] | null>(null);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [cargandoMas, setCargandoMas] = useState(false);
+  const [pagina, setPagina] = useState(1);
+  const [datos, setDatos] = useState<RespuestaProductos | null>(null);
+  const [vista, setVista] = useState<Vista>(vistaGuardada);
   const [error, setError] = useState(false);
+  const [abierto, setAbierto] = useState<ProductoAdmin | null>(null);
   const [editando, setEditando] = useState<ProductoAdmin | null>(null);
   const [precioNuevo, setPrecioNuevo] = useState<number | ''>('');
   const [guardando, setGuardando] = useState(false);
@@ -124,52 +338,50 @@ export function Productos() {
     void categorias().then((arbol) => setOpcionesCategoria(aplanarCategorias(arbol)));
   }, []);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(CLAVE_VISTA, vista);
+    } catch {
+      /* sin almacenamiento: la preferencia dura la sesión */
+    }
+  }, [vista]);
+
   const consulta = useCallback(
-    (conCursor: string | null) => {
-      const p = new URLSearchParams({ limit: '50' });
+    (pag: number) => {
+      const p = new URLSearchParams({ limit: String(POR_PAGINA), pagina: String(pag) });
       if (q.trim().length >= 2) p.set('q', q.trim());
       if (tipo) p.set('tipo', tipo);
       if (categoriaId) p.set('categoriaId', categoriaId);
       if (soloDuplicados) p.set('posibleDuplicado', 'true');
       if (actividad) p.set('activo', actividad === 'activos' ? 'true' : 'false');
-      if (conCursor) p.set('cursor', conCursor);
-      return api<{ productos: ProductoAdmin[]; siguienteCursor: string | null }>(`/productos?${p}`);
+      return api<RespuestaProductos>(`/productos?${p}`);
     },
     [q, tipo, categoriaId, soloDuplicados, actividad],
   );
 
-  // Primera página al cambiar cualquier filtro, con debounce por el texto.
+  // Cualquier filtro vuelve a la página 1.
+  useEffect(() => setPagina(1), [consulta]);
+
+  // Carga de la página actual, con debounce por el texto.
   const generacion = useRef(0);
-  useEffect(() => {
+  const cargar = useCallback(() => {
     const mia = ++generacion.current;
     setError(false);
     const id = setTimeout(() => {
-      consulta(null)
+      consulta(pagina)
         .then((r) => {
-          if (generacion.current !== mia) return;
-          setLista(r.productos);
-          setCursor(r.siguienteCursor);
+          if (generacion.current === mia) setDatos(r);
         })
         .catch(() => {
           if (generacion.current === mia) setError(true);
         });
     }, 300);
     return () => clearTimeout(id);
-  }, [consulta]);
+  }, [consulta, pagina]);
+  useEffect(cargar, [cargar]);
 
-  const cargarMas = async () => {
-    if (!cursor) return;
-    setCargandoMas(true);
-    try {
-      const r = await consulta(cursor);
-      setLista((prev) => [...(prev ?? []), ...r.productos]);
-      setCursor(r.siguienteCursor);
-    } catch {
-      setError(true);
-    } finally {
-      setCargandoMas(false);
-    }
-  };
+  const categoriaNombre = (id: string | null) =>
+    (id && opcionesCategoria.find((c) => c.id === id)?.etiqueta) || 'Sin clasificar';
 
   const abrirCambioPrecio = (p: ProductoAdmin) => {
     setEditando(p);
@@ -185,7 +397,9 @@ export function Productos() {
         method: 'PATCH',
         body: JSON.stringify({ precioVenta: precioNuevo }),
       });
-      setLista((prev) => prev?.map((p) => (p.id === actualizado.id ? { ...p, precioVenta: actualizado.precioVenta } : p)) ?? null);
+      const aplicar = (p: ProductoAdmin) => (p.id === actualizado.id ? { ...p, precioVenta: actualizado.precioVenta } : p);
+      setDatos((prev) => (prev ? { ...prev, productos: prev.productos.map(aplicar) } : prev));
+      setAbierto((prev) => (prev ? aplicar(prev) : prev));
       setEditando(null);
     } catch (e) {
       if (e instanceof ErrorApi && e.codigo === 'PRECIO_INVALIDO') setPrecioNuevo('');
@@ -195,9 +409,12 @@ export function Productos() {
     }
   };
 
+  const desde = datos ? (datos.pagina - 1) * datos.porPagina + 1 : 0;
+  const hasta = datos ? Math.min(datos.total, desde + datos.productos.length - 1) : 0;
+
   return (
     <div className="p-4">
-      <Encabezado titulo="Productos" />
+      <Encabezado titulo="Productos" extra={<ConmutadorVista vista={vista} onChange={setVista} />} />
 
       <div className="mb-3 flex flex-wrap items-end gap-3">
         <div className="w-[256px]">
@@ -232,34 +449,54 @@ export function Productos() {
 
       {error ? (
         <div className="mb-3">
-          <Banner tono="peligro" accion={<Boton onClick={() => setQ((v) => v)}>Reintentar</Boton>}>
+          <Banner tono="peligro" accion={<Boton onClick={cargar}>Reintentar</Boton>}>
             No se pudo cargar el listado. Revisa la conexión y vuelve a intentar.
           </Banner>
         </div>
       ) : null}
 
-      {lista === null ? (
+      {datos === null ? (
         <Cargando />
-      ) : lista.length === 0 ? (
+      ) : datos.productos.length === 0 ? (
         <div className="rounded-tarjeta bg-bg p-4 shadow-tarjeta">
           <Vacio mensaje="No hay productos con estos filtros. Ajusta la búsqueda o los filtros." />
         </div>
       ) : (
         <>
-          <ul className="divide-y divide-sep overflow-hidden rounded-tarjeta bg-bg shadow-tarjeta">
-            {lista.map((p) => (
-              <FilaProducto key={p.id} producto={p} onCambiarPrecio={abrirCambioPrecio} />
-            ))}
-          </ul>
-          {cursor ? (
-            <div className="mt-3 w-[192px]">
-              <Boton cargando={cargandoMas} onClick={() => void cargarMas()}>
-                Cargar 50 más
-              </Boton>
+          <p className="mb-2 text-chico text-lab3" aria-live="polite">
+            Mostrando {desde}–{hasta} de {datos.total} productos
+          </p>
+          {vista === 'lista' ? (
+            <>
+              <div className="hidden items-center gap-3 px-3 pb-1 text-chico text-lab3 sm:flex">
+                <span className="flex-1">Producto</span>
+                <span className="w-[112px] shrink-0">Tipo</span>
+                <span className="hidden w-[128px] shrink-0 md:block">Stock</span>
+                <span className="w-[96px] shrink-0 text-right">Precio</span>
+              </div>
+              <ul className="divide-y divide-sep overflow-hidden rounded-tarjeta bg-bg shadow-tarjeta">
+                {datos.productos.map((p) => (
+                  <FilaProducto key={p.id} producto={p} onAbrir={setAbierto} onCambiarPrecio={abrirCambioPrecio} />
+                ))}
+              </ul>
+            </>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              {datos.productos.map((p) => (
+                <TarjetaProducto key={p.id} producto={p} onAbrir={setAbierto} />
+              ))}
             </div>
-          ) : null}
+          )}
+          <Paginacion pagina={datos.pagina} porPagina={datos.porPagina} total={datos.total} onPagina={setPagina} />
         </>
       )}
+
+      <DetalleProductoModal
+        producto={abierto}
+        categoriaNombre={categoriaNombre}
+        onCerrar={() => setAbierto(null)}
+        onCambiarPrecio={abrirCambioPrecio}
+      />
 
       <Dialogo
         abierto={editando !== null}

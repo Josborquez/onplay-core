@@ -4,7 +4,7 @@
 // más de TOPE productos y subcategorías, primero se elige una (regla original de «Cartas»).
 // Los productos se ven en grilla (tarjetas) o en lista con miniatura; la preferencia se
 // recuerda en localStorage (solo interfaz, S3). Todo resuelto contra el caché (offline).
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   alCambiarCatalogo,
   categorias,
@@ -15,12 +15,11 @@ import {
   type ProductoCache,
 } from '../catalogo.js';
 import { clp } from '../utils/formato.js';
-import { Segmentado } from './base.js';
+import { ConmutadorVista, Segmentado, type Vista } from './base.js';
 
 /** Sin virtualización en la Etapa 1: la grilla se topa en 60 (05-SDD §rendimiento). */
 const TOPE = 60;
 
-type Vista = 'grilla' | 'lista';
 const CLAVE_VISTA = 'onplay.accesos-vista';
 
 function vistaGuardada(): Vista {
@@ -263,57 +262,6 @@ function BotonMas({ producto: p, onAgregar }: { producto: ProductoCache; onAgreg
 }
 
 /* ---------- controles ---------- */
-
-function ConmutadorVista({ vista, onChange }: { vista: Vista; onChange: (v: Vista) => void }) {
-  const opciones: { valor: Vista; etiqueta: string; icono: ReactNode }[] = [
-    {
-      valor: 'grilla',
-      etiqueta: 'Grilla',
-      icono: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <rect x="3" y="3" width="7" height="7" rx="1" />
-          <rect x="14" y="3" width="7" height="7" rx="1" />
-          <rect x="3" y="14" width="7" height="7" rx="1" />
-          <rect x="14" y="14" width="7" height="7" rx="1" />
-        </svg>
-      ),
-    },
-    {
-      valor: 'lista',
-      etiqueta: 'Lista',
-      icono: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M8 6h13M8 12h13M8 18h13" />
-          <circle cx="4" cy="6" r="1" />
-          <circle cx="4" cy="12" r="1" />
-          <circle cx="4" cy="18" r="1" />
-        </svg>
-      ),
-    },
-  ];
-  return (
-    <div role="group" aria-label="Vista de productos" className="inline-flex rounded-campo border border-sep bg-bg p-1">
-      {opciones.map((o) => {
-        const activa = o.valor === vista;
-        return (
-          <button
-            key={o.valor}
-            type="button"
-            aria-pressed={activa}
-            title={o.etiqueta}
-            onClick={() => onChange(o.valor)}
-            className={`flex h-[36px] items-center gap-1 rounded px-3 text-chico ${
-              activa ? 'bg-bg3 font-semibold text-lab shadow-tarjeta' : 'text-lab2'
-            }`}
-          >
-            {o.icono}
-            <span className="hidden sm:inline">{o.etiqueta}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 function FiltroSub({ activo, etiqueta, onClick }: { activo: boolean; etiqueta: string; onClick: () => void }) {
   return (

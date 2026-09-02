@@ -501,6 +501,15 @@ B) Revisión:   ?status=cancelled,refunded&modified_after=<marca>&dates_are_gmt=
 
 **No se revierte automáticamente:** la mercadería puede haber salido igual, o volver dañada. Lo resuelve una persona, y la reversión queda como movimiento de motivo `devolucion`.
 
+### 8.4 Prioridad entre canales (decisión del dueño, 2026-09-02 — ver `03` §6.9)
+
+> La venta física en la tienda tiene prioridad sobre la venta online. **Excepción:** un pedido online **con el pago realizado** tiene prioridad sobre la venta física.
+
+- Solo se ingieren pedidos `processing`/`completed` (§8.1), es decir **pagados**. Son los únicos que reservan stock frente al mostrador. Un pedido `pending`/`on-hold` no existe para el maestro: la tienda física le gana y, si después se paga sin stock, cae en la regla siguiente.
+- **Pedido pagado ingerido → la unidad queda reservada.** El descuento `venta_online` del paso 6 de §8.2 se hace aunque el stock quede negativo; y desde ese momento el cobro físico de esa unidad se detiene (`03` §6.9) como hecho, no como probabilidad: `409 RESERVADO_WEB` con el folio del pedido, salida solo de encargado con nota.
+- **Pedido pagado que llega cuando la unidad ya se vendió en físico** (la venta ocurrió antes de la ingesta): el descuento deja el libro negativo y se abre discrepancia **`pedido_sin_stock`** (tipo nuevo de `TipoDiscrepancia`, al final del enum) enlazada al pedido, en V14 con las acciones `contactar_cliente` (nota) / `reembolsar` (registra la anulación cuando Woo la refleje) / `reponer` (llegó otra unidad: movimiento `compra`). **Nunca se cancela solo** (lección D5-04 de onplay-erp).
+- Estas reglas no cambian §4: el push de stock sigue exigiendo la verificación previa S2.
+
 ---
 
 ## 9. Plan de implementación

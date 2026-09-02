@@ -50,6 +50,8 @@ export default async function rutasProductos(app: FastifyInstance) {
       posibleDuplicado?: string;
       limit?: string;
       cursor?: string;
+      /** R-009: paginación por número de página (misma convención que GET /ventas). */
+      pagina?: string;
     };
   }>('/productos', vendedor, async (req) => {
     const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 50) || 50));
@@ -65,6 +67,20 @@ export default async function rutasProductos(app: FastifyInstance) {
         ? { posibleDuplicado: req.query.posibleDuplicado === 'true' }
         : {}),
     };
+    // `total` resuelve 05-SDD §14 H5: un COUNT sobre ~3.000 filas es barato.
+    const total = await prisma.producto.count({ where });
+
+    if (req.query.pagina !== undefined) {
+      const pagina = Math.max(1, Number(req.query.pagina) || 1);
+      const productos = await prisma.producto.findMany({
+        where,
+        orderBy: [{ nombre: 'asc' }, { id: 'asc' }],
+        skip: (pagina - 1) * limit,
+        take: limit,
+      });
+      return { productos, total, pagina, porPagina: limit, siguienteCursor: null };
+    }
+
     const productos = await prisma.producto.findMany({
       where,
       orderBy: { id: 'asc' },
@@ -73,7 +89,7 @@ export default async function rutasProductos(app: FastifyInstance) {
     });
     const hayMas = productos.length > limit;
     if (hayMas) productos.pop();
-    return { productos, siguienteCursor: hayMas ? productos[productos.length - 1]!.id : null };
+    return { productos, total, siguienteCursor: hayMas ? productos[productos.length - 1]!.id : null };
   });
 
   // ---------- GET /productos/buscar — mostrador, máx 20 por relevancia, p95 < 200 ms ----------

@@ -24,6 +24,9 @@
 | R-006 | 2026-09-02 | Mostrador (V2) | Accesos rápidos: vista de lista con miniatura además de la grilla | Corregido (amplía 05-SDD §5.2) |
 | R-007 | 2026-09-02 | Mostrador (V2) | Panel de venta sin botón Eliminar en la línea | Corregido |
 | R-008 | 2026-09-02 | Backoffice (V18) | Sin forma de crear un cliente desde `/admin/clientes` | Corregido (amplía 07-SDD V18) |
+| R-009 | 2026-09-02 | Backoffice (V5) | Productos: paginación por página, grilla/lista, columna Stock y modal de ficha | Corregido (resuelve 05-SDD §14 H5; cantidad de stock agendada E2) |
+| R-010 | 2026-09-02 | Datos / Importador | 236 cartas Magic de onplay.cl con SKU maestro `IND-` (tipo indeterminado) | Abierto (investigar) |
+| R-011 | 2026-09-02 | Riesgo de negocio | Sobreventa entre web y mostrador con poco stock (ha ocurrido en la vida real) | Agendado (E2/E3) — regla de prioridad decidida y escrita en 03 §6.9 y 06 §8.4 |
 
 ---
 
@@ -100,6 +103,45 @@
 - **Decisión:** botón **Nuevo cliente** en el encabezado de V18 que abre un diálogo con nombre (obligatorio), RUT, teléfono y correo (opcionales). Usa el mismo `POST /clientes` del mostrador (validación de RUT, duplicados §6.6: alta → 409, media/baja → crea). Al crear navega a la ficha, que es donde vive «Cargar saldo». El diálogo recuerda el circuito del saldo: con dinero se cobra en el mostrador como venta de `SRV-000001` (§6.3, entra al arqueo); premios y ajustes van por V17 desde la ficha.
 - **Fuera de alcance:** el «crédito» (`permiteCredito`/`limiteCredito`, C8) sigue en la Fase 5 BLOQUEADA; la ficha solo lo muestra.
 - **Archivos:** `apps/web/src/pantallas/admin/Clientes.tsx` (`DialogoNuevoCliente`).
+
+### R-009 · Productos del backoffice: paginación, grilla/lista, Stock y modal de ficha
+
+- **Fecha:** 2026-09-02. **Estado:** Corregido. Pedido del dueño: «falta paginación, Stock, Listado y Grilla, al hacer clic modal con el detalle, imagen, cantidad».
+- **Qué pasaba:** V5 cargaba 50 productos y ofrecía «Cargar 50 más» (cursor, sin total por §14 H5); el detalle era una fila expandible con solo los canales; no había imagen ni vista de grilla; el stock no se mencionaba.
+- **Decisión:**
+  - **Paginación por página** con «Anterior / Siguiente», «Página X de Y» y «Mostrando 1–50 de 3.352». La API `GET /productos` acepta `pagina` (misma convención que `GET /ventas`) y devuelve `total` en ambos modos; el cursor sigue disponible. Esto **resuelve H5** de 05-SDD §14: un `COUNT` sobre ~3.000 filas es barato. Sigue sin cargarse el catálogo completo.
+  - **Grilla / Lista** con el mismo conmutador del mostrador (ahora en `components/base.tsx`). La lista lleva miniatura, nombre, SKU/nº de carta/código de barras, tipo, stock y precio; la grilla, imagen cuadrada, nombre, SKU y precio. Preferencia en `localStorage` (`onplay.productos-vista`).
+  - **Clic → modal de ficha**: imagen grande, precio con botón «Cambiar» (misma confirmación auditada), tipo, juego, categoría, stock, código de barras, nº de carta, todos los `atributos` con etiqueta en castellano (variante, padre en el canal, set, rareza…), estado, fecha de actualización y canales (SKU externo, id, precio del canal, publicado/despublicado, último sync).
+  - **Stock:** columna y dato en la ficha que muestran «No controla» o «Controla · cant. E2». **La cantidad no existe todavía** (P4; `ubicacion`/`movimiento_stock` se crean en E2 por SDD §6.2). **Agendado (E2):** cantidad por ubicación en la columna y en la ficha.
+- **Archivos:** `apps/api/src/rutas/productos.ts` (`pagina`, `total`), `apps/web/src/pantallas/admin/Productos.tsx` (reescrita), `apps/web/src/components/base.tsx` (`ConmutadorVista`, `Vista`), `apps/web/src/components/AccesoRapido.tsx` (usa el compartido).
+
+### R-010 · 236 cartas Magic de onplay.cl con SKU maestro `IND-`
+
+- **Fecha:** 2026-09-02. **Estado:** Abierto (visto al revisar R-009; no se tocó).
+- **Qué se ve:** en la grilla de productos aparecen cartas Magic (ej. «Angel's Trumpet» `IND-000016`, «Angelic Gift» `IND-000066`) con prefijo `IND-` = tipo `indeterminado`, mientras el resto lleva `MTG-SET-NNN-NM-EN`. Son 236, todas activas, todas en la categoría Magic y todas del canal onplay_cl.
+- **Hipótesis:** el SKU externo de esas cartas no calza con la forma `MTG-…` de 02-SDD §6.4, así que `skuMaestroDesdeExterno` devuelve null y el importador reserva un correlativo con el tipo del mapeo, que para ellas salió `indeterminado` en vez de `single`. Hay que mirar el `externoSku` real de algunas (`ProductoCanal`) y el mapeo de onplay.cl.
+- **Por qué importa:** el tipo alimenta el prefijo del SKU y los filtros por tipo; una carta `indeterminado` no aparece al filtrar «Cartas sueltas». Corregir el tipo es un `PATCH` auditado; el SKU maestro **no se renumera** (P3 aplica al SKU publicado; el maestro es interno, pero cambiarlo en 236 filas merece decisión aparte).
+
+### R-011 · Sobreventa entre web y mostrador con poco stock
+
+- **Fecha:** 2026-09-02. **Estado:** Agendado (E2/E3). El dueño confirma que **ha ocurrido en la vida real**; las specs 01/02 no lo tratan como riesgo explícito.
+- **Escenario:** queda 1 unidad. Un cliente la compra en onplaygames.cl y, al mismo tiempo, otro la compra en el mostrador. Hoy las dos ventas se concretan.
+- **Qué hace el sistema hoy (E1+E4):**
+  - El mostrador vende sin mirar stock (`controlaStock=false`, P4): no consulta a Woo ni tiene cantidad propia.
+  - Woo descuenta su stock solo por el pedido web. La venta física es invisible para Woo: `onplay-core` solo lee (P2, `SYNC_SOLO_LECTURA`).
+  - No hay alerta ni bloqueo en ningún punto. El conflicto aparece al preparar el pedido web y no encontrar el producto.
+  - En el carrito web Woo tampoco reserva: la reserva ocurre al crear el pedido (retención de stock de pedidos pendientes, 60 min por defecto en Woo).
+- **Qué resuelve el roadmap:**
+  - **E2 (inventario):** cantidad propia por ubicación como libro de movimientos; la venta del mostrador descuenta; los pedidos web ingresan como movimientos de salida. Aparece la base para avisar «queda 1» en el cobro.
+  - **E3 (sync bidireccional, subetapa stock):** después de cada venta física se publica el stock a Woo con la verificación S2 (leer el stock del canal, comparar con `stockPublicado`, no pisar si difiere → panel de discrepancias). El pedido web se ingiere y descuenta del libro. La ventana de choque baja a segundos, pero no a cero: dos sistemas no se pueden bloquear entre sí.
+- **Qué hicieron las versiones previas (leídas el 2026-09-02, repos `OnplayPOS` y `onplay-erp`):**
+  - **OnplayPOS** (en producción hasta 2026-03): inventario propio, pero tras cada venta empujaba `stock_quantity` **absoluto** a Woo, fire-and-forget, **sin leer el remoto** (`server/src/controllers/sale.controller.js:375-435`), y **nunca ingirió pedidos web**. Con POS=3 y la web vendiendo 2, la venta física de 1 empujaba 2 y **resucitaba stock ya vendido**. Sin reserva, sin lock, sin reconciliación, sin panel. Es la causa técnica de los casos reales.
+  - **onplay-erp** (cuarto intento, 2026-06/07): lo declaró problema raíz (`00-fundacion.md:15`) y lo diseñó completo: reserva → confirmar | liberar con `FOR UPDATE` (construido), cola de sync encolada **dentro** de la transacción de la venta y ejecutada fuera con idempotencia y reintentos (construido), ingesta de pedidos por **polling** con cursor, solo `processing` descuenta, y el pedido web perdedor queda en **EXCEPCIÓN** para resolución manual, **nunca cancelación automática ni stock negativo** (D5-04). La ingesta (5C) **no se construyó**; sin ella el push restauraba unidades vendidas, por lo que se exigía onplay.cl en standby.
+  - Diferencia clave con `onplay-core`: onplay-erp ignoraba el stock de Woo por diseño (I-1); `onplay-core` tiene S2 (leer y comparar antes de escribir), que es la guarda que faltó en ambos. Las piezas de onplay-erp (gate con candado, outbox transaccional, polling de pedidos, cola de excepciones) son el punto de partida recomendado para el SDD de E2/E3.
+- **Decisiones que la spec debe fijar (pendientes del dueño):**
+  1. **Quién gana** cuando chocan — **DECIDIDO por el dueño el 2026-09-02:** la venta física en la tienda (Merced) tiene prioridad sobre la online; **la online gana si el pago está realizado**. Escrito en `03-SDD-etapa2-inventario.md` §6.9 (E2: bloqueo con salida de encargado cuando el espejo del canal muestra 0) y `06-SDD-etapa3-sincronizacion.md` §8.4 (E3c: solo pedidos pagados reservan; `pedido_sin_stock` a excepción manual).
+  2. **Umbral de aviso** en el cobro: mostrar «último(s) N en la web» cuando el stock del canal sea ≤ umbral.
+  3. **Espejo de solo lectura antes de E2:** guardar `stock_quantity`/`stock_status` del canal en `ProductoCanal` (`stockCanal`, `stockCanalEn`) en cada sync, para que el vendedor vea la cantidad web en la ficha y en el cobro. Es lectura pura (P2), no crea inventario propio ni toca la caja. Reduce el riesgo desde ya con costo bajo; ampliación de 02-SDD §5.2 si se aprueba.
 
 ---
 

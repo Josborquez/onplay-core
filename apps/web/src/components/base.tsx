@@ -263,3 +263,59 @@ export function Vacio({ mensaje, accion }: { mensaje: string; accion?: ReactNode
 export function Cargando({ texto = 'Cargando…' }: { texto?: string }) {
   return <p className="py-6 text-center text-cuerpo text-lab3">{texto}</p>;
 }
+
+/* ---------- ConmutadorVista (grilla / lista) ---------- */
+
+export type Vista = 'grilla' | 'lista';
+
+export function ConmutadorVista({ vista, onChange }: { vista: Vista; onChange: (v: Vista) => void }) {
+  const opciones: { valor: Vista; etiqueta: string; icono: ReactNode }[] = [
+    {
+      valor: 'grilla',
+      etiqueta: 'Grilla',
+      icono: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+        </svg>
+      ),
+    },
+    {
+      valor: 'lista',
+      etiqueta: 'Lista',
+      icono: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M8 6h13M8 12h13M8 18h13" />
+          <circle cx="4" cy="6" r="1" />
+          <circle cx="4" cy="12" r="1" />
+          <circle cx="4" cy="18" r="1" />
+        </svg>
+      ),
+    },
+  ];
+  return (
+    <div role="group" aria-label="Vista de productos" className="inline-flex rounded-campo border border-sep bg-bg p-1">
+      {opciones.map((o) => {
+        const activa = o.valor === vista;
+        return (
+          <button
+            key={o.valor}
+            type="button"
+            aria-pressed={activa}
+            title={o.etiqueta}
+            onClick={() => onChange(o.valor)}
+            className={`flex h-[36px] items-center gap-1 rounded px-3 text-chico ${
+              activa ? 'bg-bg3 font-semibold text-lab shadow-tarjeta' : 'text-lab2'
+            }`}
+          >
+            {o.icono}
+            <span className="hidden sm:inline">{o.etiqueta}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
