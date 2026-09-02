@@ -7,10 +7,11 @@ import { useEnLinea } from '../../tema.js';
 import { ETIQUETA_MEDIO, type TurnoConUsuario, type VentaCreada } from '../../tipos.js';
 import { clp, hora } from '../../utils/formato.js';
 import { Banner, Boton, Cargando, Dialogo, Insignia, Segmentado, Vacio } from '../../components/base.js';
+import { DialogoDevolucion } from '../../components/DialogoDevolucion.js';
 import { Encabezado, Paginacion } from './util.js';
 
 const MENSAJE_TURNO_CERRADO =
-  'No se puede anular una venta de un turno cerrado. Corresponde una devolución, que llega en la Etapa 2.';
+  'No se puede anular una venta de un turno cerrado. Usa «Devolver…»: el dinero sale de tu caja abierta.';
 
 function hoyIso(): string {
   const d = new Date();
@@ -23,10 +24,12 @@ function FilaVenta({
   venta,
   turnoAbierto,
   onAnular,
+  onDevolver,
 }: {
   venta: VentaCreada;
   turnoAbierto: boolean;
   onAnular: (v: VentaCreada) => void;
+  onDevolver: (v: VentaCreada) => void;
 }) {
   const [abierta, setAbierta] = useState(false);
   const anulada = venta.estado === 'anulada';
@@ -82,15 +85,20 @@ function FilaVenta({
               <p className="mt-2 text-chico text-lab2">Motivo de la anulación: {venta.motivoAnulacion}</p>
             ) : null
           ) : (
-            <div className="mt-3 max-w-[220px]">
-              <Boton
-                variante="peligro"
-                deshabilitado={!turnoAbierto}
-                motivoDeshabilitado={!turnoAbierto ? MENSAJE_TURNO_CERRADO : undefined}
-                onClick={() => onAnular(venta)}
-              >
-                Anular…
-              </Boton>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <div className="w-[200px]">
+                <Boton onClick={() => onDevolver(venta)}>Devolver…</Boton>
+              </div>
+              <div className="w-[200px]">
+                <Boton
+                  variante="peligro"
+                  deshabilitado={!turnoAbierto}
+                  motivoDeshabilitado={!turnoAbierto ? MENSAJE_TURNO_CERRADO : undefined}
+                  onClick={() => onAnular(venta)}
+                >
+                  Anular…
+                </Boton>
+              </div>
             </div>
           )}
         </div>
@@ -109,6 +117,8 @@ export function VentasAdmin() {
   const [anulando, setAnulando] = useState<VentaCreada | null>(null);
   const [motivo, setMotivo] = useState('');
   const [errorAnular, setErrorAnular] = useState<string | null>(null);
+  const [devolviendo, setDevolviendo] = useState<VentaCreada | null>(null);
+  const [avisoDevolucion, setAvisoDevolucion] = useState('');
   const [enviando, setEnviando] = useState(false);
   const enLinea = useEnLinea();
 
@@ -154,6 +164,8 @@ export function VentasAdmin() {
         setErrorAnular('Este turno ya se cerró. No se pueden anular sus ventas; corresponde una devolución, que llega en la Etapa 2.');
       } else if (e instanceof ErrorApi && e.codigo === 'VENTA_YA_ANULADA') {
         setErrorAnular('Esta venta ya estaba anulada.');
+      } else if (e instanceof ErrorApi && e.codigo === 'VENTA_CON_DEVOLUCIONES') {
+        setErrorAnular('Esta venta ya tiene devoluciones: devuelve el resto en vez de anular.');
         void cargar();
       } else {
         setErrorAnular('Algo salió mal. Si vuelve a pasar, anota la hora y avisa.');
@@ -213,6 +225,7 @@ export function VentasAdmin() {
                 key={v.id}
                 venta={v}
                 turnoAbierto={turnosAbiertos.has(v.turnoCajaId)}
+                onDevolver={(venta) => setDevolviendo(venta)}
                 onAnular={(venta) => {
                   setAnulando(venta);
                   setMotivo('');
@@ -225,6 +238,18 @@ export function VentasAdmin() {
         </>
       )}
 
+      {avisoDevolucion ? (
+        <div className="mb-3">
+          <Banner tono="ok">{avisoDevolucion}</Banner>
+        </div>
+      ) : null}
+      <DialogoDevolucion
+        abierto={devolviendo !== null}
+        venta={devolviendo}
+        turnoCerrado={devolviendo ? !turnosAbiertos.has(devolviendo.turnoCajaId) : false}
+        onCerrar={() => setDevolviendo(null)}
+        onHecha={(d) => setAvisoDevolucion(`Devolución ${d.folio} registrada por ${clp(d.monto)}.`)}
+      />
       <Dialogo abierto={anulando !== null} titulo="Anular la venta" onCerrar={() => setAnulando(null)} ancho={420}>
         {anulando ? (
           <div className="flex flex-col gap-4">

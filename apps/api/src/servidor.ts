@@ -13,6 +13,7 @@ import rutasProductos from './rutas/productos.js';
 import rutasSalud from './rutas/salud.js';
 import rutasStock from './rutas/stock.js';
 import rutasRecuentos from './rutas/recuentos.js';
+import rutasDevoluciones from './rutas/devoluciones.js';
 import rutasSync from './rutas/sync.js';
 import rutasTurnos from './rutas/turnos.js';
 import rutasVentas from './rutas/ventas.js';
@@ -40,6 +41,7 @@ export async function construirServidor() {
   await app.register(rutasProductos, { prefix: '/api/v1' });
   await app.register(rutasStock, { prefix: '/api/v1' }); // E2 §7.1
   await app.register(rutasRecuentos, { prefix: '/api/v1' }); // E2 §7.2
+  await app.register(rutasDevoluciones, { prefix: '/api/v1' }); // E2 §7.3
   await app.register(rutasTurnos, { prefix: '/api/v1' });
   await app.register(rutasVentas, { prefix: '/api/v1' });
   await app.register(rutasClientes, { prefix: '/api/v1' });

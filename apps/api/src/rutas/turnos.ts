@@ -4,6 +4,19 @@ import type { FastifyInstance } from 'fastify';
 import { calcularArqueo, rolAlcanza, type Rol } from '@onplay/dominio';
 import { prisma } from '../db.js';
 
+/** E2 §6.7: devoluciones en efectivo e ingresos/retiros de caja del turno. */
+async function extrasDelTurno(turnoCajaId: string) {
+  const [dev, mov] = await Promise.all([
+    prisma.devolucion.aggregate({ _sum: { monto: true }, where: { turnoCajaId, medio: 'efectivo' } }),
+    prisma.movimientoCaja.groupBy({ by: ['tipo'], _sum: { monto: true }, where: { turnoCajaId } }),
+  ]);
+  return {
+    devolucionesEfectivo: dev._sum.monto ?? 0,
+    ingresosCaja: mov.find((m) => m.tipo === 'ingreso')?._sum.monto ?? 0,
+    retirosCaja: mov.find((m) => m.tipo === 'retiro')?._sum.monto ?? 0,
+  };
+}
+
 async function efectivoDelTurno(turnoCajaId: string): Promise<number> {
   const agg = await prisma.pago.aggregate({
     _sum: { monto: true },
@@ -78,11 +91,12 @@ export default async function rutasTurnos(app: FastifyInstance) {
       }
       const notas = typeof req.body?.notas === 'string' ? req.body.notas.trim() : '';
 
-      const efectivo = await efectivoDelTurno(turno.id);
+      const [efectivo, extras] = await Promise.all([efectivoDelTurno(turno.id), extrasDelTurno(turno.id)]);
       const { montoEsperado, diferencia } = calcularArqueo(
         turno.montoApertura,
         efectivo,
         montoDeclarado as number,
+        extras, // E2 §6.7
       );
       // Validación en el servidor, no solo en la interfaz (§5.3).
       if (diferencia !== 0 && notas === '') {
@@ -137,6 +151,10 @@ export default async function rutasTurnos(app: FastifyInstance) {
     ]);
     const cantidadVentas = ventas._count._all;
     const totalVendido = ventas._sum.total ?? 0;
+    // E2 §6.7: el esperado en vivo lo calcula el servidor con la misma fórmula del cierre.
+    const extras = await extrasDelTurno(turno.id);
+    const efectivo = porMedio.find((m) => m.medio === 'efectivo')?._sum.monto ?? 0;
+    const { montoEsperado } = calcularArqueo(turno.montoApertura, efectivo, 0, extras);
     return {
       turnoCajaId: turno.id,
       estado: turno.estado,
@@ -145,6 +163,8 @@ export default async function rutasTurnos(app: FastifyInstance) {
       cantidadVentas,
       totalVendido,
       ticketPromedio: cantidadVentas > 0 ? Math.round(totalVendido / cantidadVentas) : 0,
+      ...extras,
+      montoEsperado,
     };
   });
 

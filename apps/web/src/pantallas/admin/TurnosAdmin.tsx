@@ -86,6 +86,14 @@ function FilaTurno({ turno, esperadoVivo }: { turno: TurnoConUsuario; esperadoVi
               <p className="mt-2 text-chico text-lab2">
                 {resumen.cantidadVentas} venta(s) · total {clp(resumen.totalVendido)} · ticket promedio{' '}
                 {clp(resumen.ticketPromedio)}
+                {resumen.devolucionesEfectivo || resumen.ingresosCaja || resumen.retirosCaja ? (
+                  <>
+                    {' · '}
+                    {resumen.devolucionesEfectivo ? `devoluciones en efectivo −${clp(resumen.devolucionesEfectivo)} ` : ''}
+                    {resumen.ingresosCaja ? `ingresos de caja +${clp(resumen.ingresosCaja)} ` : ''}
+                    {resumen.retirosCaja ? `retiros de caja −${clp(resumen.retirosCaja)}` : ''}
+                  </>
+                ) : null}
               </p>
               {turno.notas ? <p className="mt-2 text-chico text-lab2">Nota del cierre: {turno.notas}</p> : null}
             </>
@@ -113,8 +121,8 @@ export function TurnosAdmin() {
         abiertos.map(async (t) => {
           try {
             const resumen = await api<ResumenTurno>(`/turnos/${t.id}/resumen`);
-            const efectivo = resumen.totalesPorMedio.find((m) => m.medio === 'efectivo')?.total ?? 0;
-            return [t.id, t.montoApertura + efectivo] as const;
+            // E2 §6.7: el servidor ya descuenta devoluciones y aplica ingresos/retiros.
+            return [t.id, resumen.montoEsperado] as const;
           } catch {
             return null;
           }

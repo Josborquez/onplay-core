@@ -15,6 +15,9 @@ import { DialogoApertura } from '../components/DialogoApertura.js';
 import { DialogoCierre } from '../components/DialogoCierre.js';
 import { DialogoCobro } from '../components/DialogoCobro.js';
 import { DialogoItemSuelto } from '../components/DialogoItemSuelto.js';
+import { DialogoMovimientoCaja } from '../components/DialogoMovimientoCaja.js';
+import { useSesion } from '../sesion.js';
+import { rolAlcanza } from '../tipos.js';
 import { PanelVenta, motivoNoCobrable } from '../components/PanelVenta.js';
 import { Banner, Boton, Dialogo } from '../components/base.js';
 
@@ -44,6 +47,16 @@ export function Mostrador() {
   const enLinea = useEnLinea();
   const cola = useCola();
   const [bannerEnviadas, setBannerEnviadas] = useState(0);
+  // E2 §6.7 (V24): movimientos de caja, solo encargado.
+  const { usuario } = useSesion();
+  const puedeCaja = rolAlcanza(usuario?.rol ?? 'vendedor', 'encargado');
+  const [cajaAbierta, setCajaAbierta] = useState(false);
+  const [bannerCaja, setBannerCaja] = useState('');
+  useEffect(() => {
+    if (!bannerCaja) return;
+    const id = setTimeout(() => setBannerCaja(''), 4000);
+    return () => clearTimeout(id);
+  }, [bannerCaja]);
 
   useEffect(() => {
     void hidratarCatalogo();
@@ -211,10 +224,28 @@ export function Mostrador() {
         <p className="text-chico text-lab2">
           Turno abierto a las {hora(turno.abiertoEn)} · apertura {clp(turno.montoApertura)}
         </p>
-        <div className="w-[160px]">
-          <Boton onClick={() => setDialogo('cierre')}>Cerrar caja</Boton>
+        <div className="flex gap-2">
+          {puedeCaja ? (
+            <div className="w-[120px]">
+              <Boton onClick={() => setCajaAbierta(true)}>Caja ±</Boton>
+            </div>
+          ) : null}
+          <div className="w-[160px]">
+            <Boton onClick={() => setDialogo('cierre')}>Cerrar caja</Boton>
+          </div>
         </div>
       </header>
+      <DialogoMovimientoCaja
+        abierto={cajaAbierta}
+        turnoId={turno.id}
+        onCerrar={() => setCajaAbierta(false)}
+        onHecho={(m) => setBannerCaja(`${m.tipo === 'retiro' ? 'Retiro' : 'Ingreso'} de ${clp(m.monto)} registrado en la caja.`)}
+      />
+      {bannerCaja ? (
+        <div className="no-imprimir mb-3">
+          <Banner tono="ok">{bannerCaja}</Banner>
+        </div>
+      ) : null}
 
       {bannerEnviadas > 0 ? (
         <div className="no-imprimir mb-3">

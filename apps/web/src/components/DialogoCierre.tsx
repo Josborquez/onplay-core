@@ -36,7 +36,8 @@ export function DialogoCierre({ abierto, turno, onCerrar, onCerrado }: Props) {
 
   const efectivoVentas =
     resumen?.totalesPorMedio.find((m) => m.medio === 'efectivo')?.total ?? 0;
-  const esperado = (resumen?.montoApertura ?? 0) + efectivoVentas;
+  // E2 §6.7: el servidor ya aplica devoluciones e ingresos/retiros de caja.
+  const esperado = resumen?.montoEsperado ?? (resumen?.montoApertura ?? 0) + efectivoVentas;
   const diferencia = declarado === '' ? null : declarado - esperado;
   const notaFalta = diferencia !== null && diferencia !== 0 && notas.trim() === '';
 
@@ -97,6 +98,9 @@ export function DialogoCierre({ abierto, turno, onCerrar, onCerrado }: Props) {
           <div className="num mt-3 flex flex-col gap-1 text-cuerpo text-lab">
             <div className="flex justify-between"><span className="text-lab2">Monto de apertura</span><span>{clp(cerrado.montoApertura)}</span></div>
             <div className="flex justify-between"><span className="text-lab2">+ Ventas en efectivo</span><span>{clp(efectivoVentas)}</span></div>
+            {resumen?.devolucionesEfectivo ? <div className="flex justify-between"><span className="text-lab2">− Devoluciones en efectivo</span><span>{clp(resumen.devolucionesEfectivo)}</span></div> : null}
+            {resumen?.ingresosCaja ? <div className="flex justify-between"><span className="text-lab2">+ Ingresos de caja</span><span>{clp(resumen.ingresosCaja)}</span></div> : null}
+            {resumen?.retirosCaja ? <div className="flex justify-between"><span className="text-lab2">− Retiros de caja</span><span>{clp(resumen.retirosCaja)}</span></div> : null}
             <div className="flex justify-between border-t border-sep pt-1 font-semibold"><span>Debería haber</span><span>{clp(cerrado.montoEsperado ?? 0)}</span></div>
             <div className="flex justify-between"><span className="text-lab2">Declarado</span><span>{clp(cerrado.montoDeclarado ?? 0)}</span></div>
           </div>

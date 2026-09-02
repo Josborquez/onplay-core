@@ -461,6 +461,11 @@ export default async function rutasVentas(app: FastifyInstance) {
       if (venta.estado === 'anulada') {
         return reply.code(409).send({ error: 'VENTA_YA_ANULADA' });
       }
+      // E2 §6.6: con devoluciones, el camino es devolver el resto, no anular.
+      const conDevoluciones = await prisma.devolucion.count({ where: { ventaId: venta.id } });
+      if (conDevoluciones > 0) {
+        return reply.code(409).send({ error: 'VENTA_CON_DEVOLUCIONES', detalle: 'Esta venta ya tiene devoluciones: devuelve el resto en vez de anular' });
+      }
       // Anular una venta de un turno cerrado invalidaría un arqueo ya persistido (§5.3).
       if (venta.turnoCaja.estado !== 'abierto') {
         return reply.code(409).send({

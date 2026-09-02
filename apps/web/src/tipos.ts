@@ -20,6 +20,11 @@ export interface ResumenTurno {
   cantidadVentas: number;
   totalVendido: number;
   ticketPromedio: number;
+  /** E2 §6.7 */
+  devolucionesEfectivo: number;
+  ingresosCaja: number;
+  retirosCaja: number;
+  montoEsperado: number;
 }
 
 export type MedioPago =
@@ -48,6 +53,7 @@ export interface VentaCreada {
   total: number;
   estado: 'completada' | 'anulada';
   motivoAnulacion?: string | null;
+  clienteId?: string | null;
   creadoEn: string;
   lineas: {
     id: string;
