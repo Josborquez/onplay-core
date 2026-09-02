@@ -319,3 +319,38 @@ export function ConmutadorVista({ vista, onChange }: { vista: Vista; onChange: (
   );
 }
 
+/* ---------- EtiquetaStock (E2 §6.2 / §6.8) ---------- */
+
+export interface StockMostrable {
+  controlaStock?: boolean;
+  stockTotal?: number | null;
+  stockVenta?: number | null;
+  stockCanalMin?: number | null;
+  estadoStock?: 'sin_control' | 'negativo' | 'quiebre' | 'bajo' | 'ok';
+}
+
+/**
+ * Texto corto de stock para listas y tarjetas. No dice nada si el producto no controla stock.
+ * El espejo del canal se etiqueta SIEMPRE «en la web», nunca «stock» a secas (RI3).
+ */
+export function EtiquetaStock({ p, clase = '' }: { p: StockMostrable; clase?: string }) {
+  if (!p.controlaStock || p.stockTotal == null || !p.estadoStock || p.estadoStock === 'sin_control') return null;
+  const tono =
+    p.estadoStock === 'negativo' || p.estadoStock === 'quiebre'
+      ? 'text-peligro'
+      : p.estadoStock === 'bajo'
+        ? 'text-alerta'
+        : 'text-lab3';
+  const web =
+    p.stockCanalMin != null && p.stockCanalMin <= 0
+      ? ' · agotado en la web'
+      : p.stockCanalMin === 1
+        ? ' · último en la web'
+        : '';
+  return (
+    <span className={`num text-chico ${tono} ${clase}`}>
+      {p.estadoStock === 'quiebre' ? 'sin stock' : `stock ${p.stockTotal}`}
+      {web}
+    </span>
+  );
+}

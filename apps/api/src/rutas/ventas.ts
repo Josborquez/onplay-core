@@ -10,9 +10,9 @@ import {
   validarYCalcularVenta,
   type LineaEntrada,
   type PagoEntrada,
-  type Rol,
-} from '@onplay/dominio';
+  type Rol, avisoWeb } from '@onplay/dominio';
 import { prisma } from '../db.js';
+import { ErrorStock, bloquearStock, contextoReserva, registrarMovimiento, ubicacionVenta } from '../stock/libro.js';
 
 const MEDIOS_VALIDOS = new Set([
   'efectivo',
@@ -38,6 +38,8 @@ class ErrorMonedero extends Error {
 interface CuerpoVenta {
   idempotencyKey?: unknown;
   clienteId?: unknown; // E4 HC2: cliente identificado, opcional (M3)
+  /** E2 §6.9: encargado que vende pese al bloqueo por pedido web pagado; exige nota. */
+  forzarReservado?: unknown;
   clienteNombre?: unknown;
   descuento?: unknown;
   lineas?: unknown;
@@ -85,7 +87,10 @@ export default async function rutasVentas(app: FastifyInstance) {
     const productos = new Map(
       (await prisma.producto.findMany({ where: { id: { in: ids } } })).map((p) => [p.id, p]),
     );
-    const advertencias: { lineaIndex: number; precioActual: number; precioEnviado: number }[] = [];
+    type Advertencia =
+      | { tipo: 'PRECIO_DISTINTO'; lineaIndex: number; precioActual: number; precioEnviado: number }
+      | { tipo: 'STOCK_NEGATIVO'; productoId: string; descripcion: string; ubicacion: string; cantidadNueva: number };
+    const advertencias: Advertencia[] = [];
     const lineas: LineaEntrada[] = [];
     for (let i = 0; i < lineasCrudas.length; i++) {
       const l = lineasCrudas[i]!;
@@ -95,7 +100,7 @@ export default async function rutasVentas(app: FastifyInstance) {
           return reply.code(422).send({ error: 'PRODUCTO_NO_ENCONTRADO', detalle: `Línea ${i}: productoId ${l.productoId}` });
         }
         if (producto.precioVenta !== l.precioUnitario) {
-          advertencias.push({ lineaIndex: i, precioActual: producto.precioVenta, precioEnviado: l.precioUnitario });
+          advertencias.push({ tipo: 'PRECIO_DISTINTO', lineaIndex: i, precioActual: producto.precioVenta, precioEnviado: l.precioUnitario });
         }
         lineas.push({ ...l, productoId: producto.id, descripcion: producto.nombre });
       } else {
@@ -149,6 +154,49 @@ export default async function rutasVentas(app: FastifyInstance) {
       return reply.code(422).send({ error: 'MEDIO_PAGO_INVALIDO', detalle: 'Una carga de saldo nunca se paga con monedero (§6.3)' });
     }
 
+    // E2 §6.3: líneas que descuentan stock (productos con controlaStock), agregadas por producto
+    // y ORDENADAS por id: es el orden en que se toman los candados (§6.1).
+    const porProducto = new Map<string, { cantidad: number; descripcion: string }>();
+    for (const l of lineas) {
+      const producto = l.productoId ? productos.get(l.productoId) : undefined;
+      if (!producto?.controlaStock) continue;
+      const previo = porProducto.get(producto.id);
+      porProducto.set(producto.id, { cantidad: (previo?.cantidad ?? 0) + l.cantidad, descripcion: producto.nombre });
+    }
+    const lineasStock = [...porProducto.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    let ubicacionVentaActual: { id: string; codigo: string } | null = null;
+    const reservadosForzados: { productoId: string; canalId: string; stockCanal: number | null; stockCanalEn: Date | null; stockPropio: number }[] = [];
+    if (lineasStock.length > 0) {
+      try {
+        ubicacionVentaActual = await ubicacionVenta(prisma);
+      } catch (e) {
+        if (e instanceof ErrorStock) return reply.code(e.status).send(e.cuerpo);
+        throw e;
+      }
+      // §6.9 prioridad entre canales: si el espejo del canal dice que la web ya vendió y cobró la
+      // última unidad, el cobro se detiene; solo un encargado con nota puede seguir.
+      const ctx = await contextoReserva(prisma, lineasStock.map(([id]) => id), ubicacionVentaActual.id);
+      const forzar = req.body?.forzarReservado as { nota?: unknown } | undefined;
+      const notaForzar = forzar && typeof forzar.nota === 'string' ? forzar.nota.trim() : '';
+      for (const [productoId] of lineasStock) {
+        const c = ctx.get(productoId)!;
+        const nivel = avisoWeb({ controlaStock: true, stockPropioVenta: c.stockPropioVenta, canales: c.canales });
+        if (nivel !== 'reservado') continue;
+        const canal = c.canales.find((k) => k.manejaStockCanal && k.stockCanal !== null && k.stockCanal <= 0)!;
+        const detalle = { productoId, canalId: canal.canalId, stockCanal: canal.stockCanal, stockCanalEn: canal.stockCanalEn, stockPropio: c.stockPropioVenta };
+        if (notaForzar && rolAlcanza(req.user.rol, 'encargado')) {
+          reservadosForzados.push(detalle);
+          continue;
+        }
+        return reply.code(409).send({
+          error: 'RESERVADO_WEB',
+          detalle: 'Este producto figura agotado en la tienda online: probablemente lo compró y pagó un cliente web, y ese pedido tiene prioridad (03 §6.9).',
+          ...detalle,
+          descripcion: porProducto.get(productoId)!.descripcion,
+        });
+      }
+    }
+
     try {
       const venta = await prisma.$transaction(async (tx) => {
         // E4 §6.2: cerrojo sobre la fila Cliente PRIMERO (determinista incluso
@@ -175,6 +223,11 @@ export default async function rutasVentas(app: FastifyInstance) {
             const { codigo, ...resto } = errorTope;
             throw new ErrorMonedero({ error: codigo, ...resto });
           }
+        }
+
+        // E2 §6.1: candados de StockActual en orden ascendente, ANTES del Correlativo.
+        for (const [productoId] of lineasStock) {
+          await bloquearStock(tx, productoId, ubicacionVentaActual!.id);
         }
 
         // 10. Folio con SELECT ... FOR UPDATE sobre Correlativo (§5.5).
@@ -233,6 +286,34 @@ export default async function rutasVentas(app: FastifyInstance) {
           include: incluirDetalle,
         });
 
+        // E2 §6.3: descuento de stock (motivo venta). Nunca bloquea: si queda negativo, advierte (M2).
+        for (const [productoId, { cantidad, descripcion }] of lineasStock) {
+          const r = await registrarMovimiento(tx, {
+            productoId,
+            ubicacionId: ubicacionVentaActual!.id,
+            cantidad: -cantidad,
+            motivo: 'venta',
+            referenciaTipo: 'venta',
+            referenciaId: creada.id,
+            usuarioId: req.user.sub,
+          });
+          if (r.quedaNegativo) {
+            advertencias.push({ tipo: 'STOCK_NEGATIVO', productoId, descripcion, ubicacion: ubicacionVentaActual!.codigo, cantidadNueva: r.cantidadNueva });
+          }
+        }
+        if (reservadosForzados.length > 0) {
+          const forzar = req.body?.forzarReservado as { nota: string };
+          await tx.auditoria.create({
+            data: {
+              usuarioId: req.user.sub,
+              entidad: 'venta',
+              entidadId: creada.id,
+              accion: 'vender_reservado',
+              valorNuevo: { folio, nota: String(forzar.nota).trim(), productos: reservadosForzados } as unknown as Prisma.InputJsonValue,
+            },
+          });
+        }
+
         // §6.2 paso 4: el consumo de saldo, negativo, referenciando la venta.
         if (montoMonedero > 0) {
           await tx.movimientoMonedero.create({
@@ -288,6 +369,7 @@ export default async function rutasVentas(app: FastifyInstance) {
     } catch (e) {
       // Saldo insuficiente o tope de crédito: la transacción entera se abortó (§6.2 paso 5).
       if (e instanceof ErrorMonedero) return reply.code(422).send(e.cuerpo);
+      if (e instanceof ErrorStock) return reply.code(e.status).send(e.cuerpo);
       // Carrera sobre idempotencyKey: dos reintentos simultáneos. Devolver la original.
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
         const original = await prisma.venta.findUnique({
@@ -448,6 +530,24 @@ export default async function rutasVentas(app: FastifyInstance) {
             });
           }
         }
+        // E2 §6.3: por cada descuento de esta venta, un movimiento POSITIVO `devolucion`.
+        // El original no se toca (P9).
+        const descuentos = await tx.movimientoStock.findMany({
+          where: { referenciaTipo: 'venta', referenciaId: venta.id, motivo: 'venta' },
+          orderBy: [{ productoId: 'asc' }, { ubicacionId: 'asc' }],
+        });
+        for (const d of descuentos) {
+          await registrarMovimiento(tx, {
+            productoId: d.productoId,
+            ubicacionId: d.ubicacionId,
+            cantidad: -d.cantidad,
+            motivo: 'devolucion',
+            referenciaTipo: 'venta',
+            referenciaId: venta.id,
+            nota: `Anulación de ${venta.folio}: ${motivo}`,
+            usuarioId: req.user.sub,
+          });
+        }
         await tx.auditoria.create({
           data: {
             usuarioId: req.user.sub,
@@ -455,7 +555,7 @@ export default async function rutasVentas(app: FastifyInstance) {
             entidadId: venta.id,
             accion: 'anular',
             valorAnterior: { estado: 'completada' },
-            valorNuevo: { estado: 'anulada', motivo },
+            valorNuevo: { estado: 'anulada', motivo, stockRepuesto: descuentos.length },
           },
         });
         return v;

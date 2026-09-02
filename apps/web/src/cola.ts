@@ -22,6 +22,9 @@ export interface CuerpoVenta {
     descuentoLinea: number;
   }[];
   pagos: PagoNuevo[];
+  /** E2 §6.9: encargado que vende pese al bloqueo por pedido web pagado; exige nota. */
+  forzarReservado?: { nota: string };
+  /** E2 §6.9: encargado que vende pese al bloqueo por pedido web pagado; exige nota. */
 }
 
 interface VentaPendiente {

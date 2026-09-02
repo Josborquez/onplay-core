@@ -103,15 +103,67 @@ function Imagen({ src, alt, clase }: { src: string | null; alt: string; clase: s
 }
 
 function TextoStock({ p }: { p: ProductoAdmin }) {
-  // E1/E4: solo se sabe si controla stock. La cantidad por ubicación es de E2.
-  return p.controlaStock ? (
-    <span className="text-lab2" title="Controla stock. La cantidad por ubicación llega en la Etapa 2.">
-      Controla · cant. E2
+  // E2 §6.2: total con insignia de estado; el espejo del canal se etiqueta «en la web» (RI3).
+  if (!p.controlaStock || p.stockTotal == null) {
+    return (
+      <span className="text-lab3" title="No controla stock (P4). Se enciende con un recuento (M5).">
+        No controla
+      </span>
+    );
+  }
+  const tono = p.estadoStock === 'negativo' || p.estadoStock === 'quiebre' ? 'text-peligro' : p.estadoStock === 'bajo' ? 'text-alerta' : 'text-lab';
+  const etiqueta = { negativo: 'negativo', quiebre: 'sin stock', bajo: 'bajo', ok: '', sin_control: '' }[p.estadoStock];
+  return (
+    <span className={`num ${tono}`} title={p.stockMinimo > 0 ? `Mínimo ${p.stockMinimo}` : undefined}>
+      {p.stockTotal}
+      {etiqueta ? ` · ${etiqueta}` : ''}
+      {p.stockCanalMin != null && p.stockCanalMin <= 0 ? ' · agotado en la web' : p.stockCanalMin === 1 ? ' · último en la web' : ''}
     </span>
-  ) : (
-    <span className="text-lab3" title="No controla stock (P4). Se vende sin descontar cantidad.">
-      No controla
-    </span>
+  );
+}
+
+interface StockDetalle {
+  ubicaciones: { id: string; codigo: string; nombre: string; esVenta: boolean; cantidad: number }[];
+  canales: { canalId: string; publicado: boolean; stockCanal: number | null; manejaStockCanal: boolean | null; stockCanalEn: string | null }[];
+}
+
+/** Desglose por ubicación y espejo del canal (E2 §6.2, §6.8), solo si controla stock. */
+function DesgloseStock({ productoId, controlaStock }: { productoId: string; controlaStock: boolean }) {
+  const [d, setD] = useState<StockDetalle | null>(null);
+  useEffect(() => {
+    setD(null);
+    let vivo = true;
+    api<StockDetalle>(`/productos/${productoId}/stock`)
+      .then((r) => {
+        if (vivo) setD(r);
+      })
+      .catch(() => {});
+    return () => {
+      vivo = false;
+    };
+  }, [productoId]);
+  if (!d) return null;
+  const conEspejo = d.canales.filter((c) => c.manejaStockCanal && c.stockCanal !== null);
+  return (
+    <>
+      {controlaStock ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {d.ubicaciones.map((u) => (
+            <span key={u.id} className="rounded border border-sep bg-bg2 px-2 py-1 text-chico text-lab">
+              {u.nombre}
+              {u.esVenta ? ' (venta)' : ''}: <span className={`num font-semibold ${u.cantidad < 0 ? 'text-peligro' : ''}`}>{u.cantidad}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {conEspejo.length > 0 ? (
+        <p className="mt-2 text-chico text-lab3">
+          En la web:{' '}
+          {conEspejo.map((c) => `${c.canalId} ${c.stockCanal}${c.stockCanalEn ? ` (${fecha(c.stockCanalEn)})` : ''}`).join(' · ')}
+          . Solo lectura: no se suma al stock propio.
+        </p>
+      ) : null}
+    </>
   );
 }
 
@@ -267,6 +319,7 @@ function DetalleProductoModal({
               <Dato etiqueta="Stock">
                 <TextoStock p={p} />
               </Dato>
+              <DesgloseStock productoId={p.id} controlaStock={p.controlaStock} />
               {p.codigoBarras ? (
                 <Dato etiqueta="Código de barras">
                   <span className="font-mono">{p.codigoBarras}</span>

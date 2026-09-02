@@ -1,12 +1,12 @@
 // V2 — Mostrador (05-SDD §7.1): buscador + accesos rápidos + panel de venta.
 // Exige turno abierto (V1). Atajos SOLO con teclas de función (F1/F2/F8).
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ulid } from 'ulid';
 import { api } from '../api.js';
-import { hidratarCatalogo, iniciarRefrescoPeriodico, type ProductoCache } from '../catalogo.js';
+import { productoPorId, hidratarCatalogo, iniciarRefrescoPeriodico, type ProductoCache } from '../catalogo.js';
 import { encolarVenta, useCola, type CuerpoVenta } from '../cola.js';
 import { useEnLinea } from '../tema.js';
-import type { ClienteResumen, LineaCarrito, PagoNuevo, RespuestaVenta, Turno } from '../tipos.js';
+import type { ClienteResumen, LineaCarrito, PagoNuevo, RespuestaVenta, Turno, ReservadoWeb } from '../tipos.js';
 import { clp, hora } from '../utils/formato.js';
 import { AccesoRapido } from '../components/AccesoRapido.js';
 import { BarraTotalFija } from '../components/BarraTotalFija.js';
@@ -108,7 +108,8 @@ export function Mostrador() {
   }, [dialogo, cobrable, carrito.length, abrirCobro]);
 
   const construirCuerpo = useCallback(
-    (pagos: PagoNuevo[]): CuerpoVenta => ({
+    (pagos: PagoNuevo[], extra?: { forzarReservado?: { nota: string } }): CuerpoVenta => ({
+      ...(extra?.forzarReservado ? { forzarReservado: extra.forzarReservado } : {}),
       idempotencyKey: claveVenta ?? ulid(),
       clienteId: cliente?.id ?? null,
       clienteNombre: cliente ? null : nombreLibre.trim() || null,
@@ -126,20 +127,43 @@ export function Mostrador() {
   );
 
   const confirmarVenta = useCallback(
-    async (pagos: PagoNuevo[]) => {
+    async (pagos: PagoNuevo[], extra?: { forzarReservado?: { nota: string } }) => {
       const r = await api<RespuestaVenta>('/ventas', {
         method: 'POST',
-        body: JSON.stringify(construirCuerpo(pagos)),
+        body: JSON.stringify(construirCuerpo(pagos, extra)),
       });
-      return { folio: r.venta.folio, advertencias: r.advertencias.length };
+      return {
+        folio: r.venta.folio,
+        advertencias: {
+          precio: r.advertencias.filter((a) => a.tipo === 'PRECIO_DISTINTO' || !('tipo' in a)).length,
+          stockNegativo: r.advertencias.flatMap((a) => (a.tipo === 'STOCK_NEGATIVO' ? [a.descripcion] : [])),
+        },
+      };
     },
     [construirCuerpo],
   );
 
   // F10: sin conexión la venta se guarda en IndexedDB con su idempotencyKey.
   const encolar = useCallback(
-    (pagos: PagoNuevo[]) => void encolarVenta(construirCuerpo(pagos)),
+    (pagos: PagoNuevo[], extra?: { forzarReservado?: { nota: string } }) => void encolarVenta(construirCuerpo(pagos, extra)),
     [construirCuerpo],
+  );
+
+  // E2 §6.9 sin conexión: la misma regla con el espejo del caché (más viejo, y el diálogo lo dice).
+  const reservadosCache = useMemo<ReservadoWeb[]>(
+    () =>
+      carrito.flatMap((l) => {
+        if (!l.productoId) return [];
+        const p = productoPorId(l.productoId);
+        if (!p?.controlaStock || p.stockCanalMin == null || p.stockCanalMin > 0 || (p.stockVenta ?? 0) < 1) return [];
+        return [{ productoId: p.id, descripcion: p.nombre, canalId: 'web', stockCanal: p.stockCanalMin, stockCanalEn: null, stockPropio: p.stockVenta ?? 0, desdeCache: true }];
+      }),
+    [carrito],
+  );
+
+  const quitarProducto = useCallback(
+    (productoId: string) => setCarrito((prev) => prev.filter((l) => l.productoId !== productoId)),
+    [],
   );
 
   // Al vaciarse la cola: banner ok 4 segundos; si algo falló, banner peligro
@@ -260,6 +284,8 @@ export function Mostrador() {
         onConfirmar={confirmarVenta}
         onEncolar={encolar}
         onListo={ventaLista}
+        reservadosCache={reservadosCache}
+        onQuitarProducto={quitarProducto}
       />
       <DialogoItemSuelto
         abierto={dialogo === 'suelto'}

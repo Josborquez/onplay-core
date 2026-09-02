@@ -5,7 +5,7 @@ import { api } from '../api.js';
 import { buscarLocal, catalogoListo, porCodigoBarras, type ProductoCache } from '../catalogo.js';
 import { useEnLinea } from '../tema.js';
 import { clp } from '../utils/formato.js';
-import { Insignia, Vacio } from './base.js';
+import { EtiquetaStock, Insignia, Vacio } from './base.js';
 
 export const ResultadoBusqueda = memo(function ResultadoBusqueda({
   producto,
@@ -30,6 +30,7 @@ export const ResultadoBusqueda = memo(function ResultadoBusqueda({
           <span className="block truncate font-mono text-chico text-lab3">
             {producto.sku}
             {producto.cardNumber ? ` · ${producto.cardNumber}` : ''}
+            <EtiquetaStock p={producto} clase="ml-2 font-sans" />
           </span>
         </span>
         <span className="ml-3 flex shrink-0 items-center gap-2">

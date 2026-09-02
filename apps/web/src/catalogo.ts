@@ -14,14 +14,20 @@ export interface ProductoCache {
   activo: boolean;
   /** URL de la imagen en el canal (R-006). Puede faltar en filas cacheadas con esquema viejo. */
   imagenUrl?: string | null;
+  /** E2 §7.3 (esquema 3). Faltan en filas cacheadas con esquema viejo. */
+  controlaStock?: boolean;
+  stockTotal?: number | null;
+  stockVenta?: number | null;
+  stockCanalMin?: number | null;
+  estadoStock?: 'sin_control' | 'negativo' | 'quiebre' | 'bajo' | 'ok';
 }
 
 /**
  * Versión de los campos que trae `catalogo-offline`. Si cambia, el delta `?desde` no basta
  * (las filas viejas no tendrían el campo nuevo): se baja el catálogo completo una vez.
- * 1 = §5.2 original · 2 = + imagenUrl (R-006).
+ * 1 = §5.2 original · 2 = + imagenUrl (R-006) · 3 = + stock (E2 §7.3).
  */
-const ESQUEMA_CATALOGO = 2;
+const ESQUEMA_CATALOGO = 3;
 
 export interface Categoria {
   id: string;
@@ -126,6 +132,11 @@ export function iniciarRefrescoPeriodico(): () => void {
 
 const normalizar = (s: string) =>
   s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+/** Producto del caché por id (E2: el cobro offline revisa el espejo del canal, §6.9). */
+export function productoPorId(id: string): ProductoCache | undefined {
+  return indice.find((p) => p.id === id);
+}
 
 /** Coincidencia exacta de código de barras: se agrega sin mostrar la lista (05-SDD V2). */
 export function porCodigoBarras(texto: string): ProductoCache | undefined {

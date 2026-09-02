@@ -15,7 +15,7 @@ import {
   type ProductoCache,
 } from '../catalogo.js';
 import { clp } from '../utils/formato.js';
-import { ConmutadorVista, Segmentado, type Vista } from './base.js';
+import { ConmutadorVista, EtiquetaStock, Segmentado, type Vista } from './base.js';
 
 /** Sin virtualización en la Etapa 1: la grilla se topa en 60 (05-SDD §rendimiento). */
 const TOPE = 60;
@@ -177,7 +177,10 @@ function TarjetaProducto({ producto: p, onAgregar }: { producto: ProductoCache; 
         {p.nombre}
       </p>
       <div className="mt-auto flex items-center justify-between gap-1 px-2 pb-2">
-        <span className="num font-black text-cuerpo leading-none text-lab">{clp(p.precioVenta)}</span>
+        <span className="flex flex-col">
+          <span className="num font-black text-cuerpo leading-none text-lab">{clp(p.precioVenta)}</span>
+          <EtiquetaStock p={p} />
+        </span>
         <BotonMas producto={p} onAgregar={onAgregar} />
       </div>
     </div>
@@ -194,7 +197,10 @@ function FilaProducto({ producto: p, onAgregar }: { producto: ProductoCache; onA
       <Miniatura src={p.imagenUrl ?? null} alt={p.nombre} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-cuerpo font-medium leading-tight text-lab">{p.nombre}</p>
-        <p className="num text-chico text-lab3">{p.sku}</p>
+        <p className="num text-chico text-lab3">
+          {p.sku}
+          <EtiquetaStock p={p} clase="ml-2" />
+        </p>
       </div>
       <span className="num shrink-0 font-black text-cuerpo leading-none text-lab">{clp(p.precioVenta)}</span>
       <BotonMas producto={p} onAgregar={onAgregar} />

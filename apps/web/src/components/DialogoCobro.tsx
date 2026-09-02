@@ -4,7 +4,8 @@
 // elegirlo el monto se precarga con min(falta, disponible). La API revalida.
 import { useEffect, useRef, useState } from 'react';
 import { ErrorApi } from '../api.js';
-import { ETIQUETA_MEDIO, MEDIOS_ORDEN, type ClienteResumen, type MedioPago, type PagoNuevo } from '../tipos.js';
+import { ETIQUETA_MEDIO, MEDIOS_ORDEN, rolAlcanza, type ClienteResumen, type MedioPago, type PagoNuevo, type ReservadoWeb } from '../tipos.js';
+import { useSesion } from '../sesion.js';
 import { clp } from '../utils/formato.js';
 import { Banner, Boton, Campo, CampoMonto, Dialogo, Insignia } from './base.js';
 import { SelectorCliente } from './SelectorCliente.js';
@@ -16,8 +17,10 @@ interface Exito {
   folio: string | null;
   total: number;
   vuelto: number;
-  advertencias: number;
+  advertencias: { precio: number; stockNegativo: string[] };
 }
+
+type Forzar = { forzarReservado?: { nota: string } };
 
 interface Props {
   abierto: boolean;
@@ -30,12 +33,15 @@ interface Props {
   onQuitarCliente: () => void;
   onNombreLibre: (nombre: string) => void;
   onCerrar: () => void;
-  /** Hace el POST /ventas y devuelve folio + nº de advertencias. */
-  onConfirmar: (pagos: PagoNuevo[]) => Promise<{ folio: string; advertencias: number }>;
+  /** Hace el POST /ventas y devuelve folio + advertencias. */
+  onConfirmar: (pagos: PagoNuevo[], extra?: Forzar) => Promise<{ folio: string; advertencias: Exito['advertencias'] }>;
   /** Sin conexión: encola la venta en IndexedDB (F10). */
-  onEncolar: (pagos: PagoNuevo[]) => void;
+  onEncolar: (pagos: PagoNuevo[], extra?: Forzar) => void;
   /** Éxito consumido: limpiar carrito y devolver el foco al buscador. */
   onListo: () => void;
+  /** E2 §6.9: productos del carrito que el CACHÉ marca como agotados en la web (uso offline). */
+  reservadosCache: ReservadoWeb[];
+  onQuitarProducto: (productoId: string) => void;
 }
 
 export function DialogoCobro({
@@ -51,7 +57,14 @@ export function DialogoCobro({
   onConfirmar,
   onEncolar,
   onListo,
+  reservadosCache,
+  onQuitarProducto,
 }: Props) {
+  const { usuario } = useSesion();
+  const puedeForzar = rolAlcanza(usuario?.rol ?? 'vendedor', 'encargado');
+  // E2 §6.9: bloqueo por pedido web pagado; `reservado` viene del 409 o del caché offline.
+  const [reservado, setReservado] = useState<ReservadoWeb | null>(null);
+  const [notaForzar, setNotaForzar] = useState('');
   const [medio, setMedio] = useState<MedioPago>('efectivo');
   const [monto, setMonto] = useState<number | ''>('');
   const [recibido, setRecibido] = useState<number | ''>('');
@@ -153,28 +166,39 @@ export function DialogoCobro({
   const vueltoDe = (lista: PagoNuevo[]) =>
     lista.reduce((s, p) => s + (p.montoRecibido != null ? p.montoRecibido - p.monto : 0), 0);
 
-  const encolar = () => {
-    onEncolar(pagos);
-    setExito({ folio: null, total, vuelto: vueltoDe(pagos), advertencias: 0 });
+  const encolar = (extra?: Forzar) => {
+    onEncolar(pagos, extra);
+    setExito({ folio: null, total, vuelto: vueltoDe(pagos), advertencias: { precio: 0, stockNegativo: [] } });
   };
 
-  const confirmar = async () => {
+  const confirmar = async (extra?: Forzar) => {
     if (falta !== 0 || enviando) return;
     if (!enLinea) {
+      // E2 §6.9 offline: la misma regla con el espejo del caché, salvo que ya venga forzada.
+      if (!extra?.forzarReservado && reservadosCache.length > 0) {
+        setReservado(reservadosCache[0]!);
+        return;
+      }
       // F10: sin conexión se encola en IndexedDB, sin ningún diálogo extra.
-      encolar();
+      encolar(extra);
       return;
     }
     setEnviando(true);
     setError('');
     try {
-      const r = await onConfirmar(pagos);
+      const r = await onConfirmar(pagos, extra);
+      setReservado(null);
       setExito({ folio: r.folio, total, vuelto: vueltoDe(pagos), advertencias: r.advertencias });
     } catch (e) {
       if (!(e instanceof ErrorApi)) {
         // La red se cayó a mitad del cobro: se encola igual (la idempotencyKey
         // persistida garantiza que si el POST sí llegó, no se duplica).
-        encolar();
+        encolar(extra);
+        return;
+      }
+      if (e.codigo === 'RESERVADO_WEB') {
+        setReservado(e.cuerpo as unknown as ReservadoWeb);
+        setEnviando(false);
         return;
       }
       const detalle = typeof e.cuerpo.detalle === 'string' ? ` ${e.cuerpo.detalle}` : '';
@@ -182,6 +206,21 @@ export function DialogoCobro({
       setEnviando(false);
     }
   };
+
+  const venderIgual = () => {
+    const nota = notaForzar.trim();
+    if (!nota) return;
+    void confirmar({ forzarReservado: { nota } });
+  };
+
+  const quitarReservado = () => {
+    if (reservado) onQuitarProducto(reservado.productoId);
+    setReservado(null);
+    onCerrar();
+  };
+
+  const minutosDesde = (iso: string | null) =>
+    iso ? Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000)) : null;
 
   const alTeclear = (e: React.KeyboardEvent) => {
     if (exito) {
@@ -202,6 +241,7 @@ export function DialogoCobro({
     }
     if (e.key === 'Enter') {
       e.preventDefault();
+      if (reservado) return; // el bloqueo de §6.9 se resuelve con los botones, no con Enter
       if (falta > 0) agregarPago();
       else void confirmar();
     }
@@ -236,10 +276,15 @@ export function DialogoCobro({
             {exito.vuelto > 0 ? (
               <p className="num text-tit text-lab">Vuelto: {clp(exito.vuelto)}</p>
             ) : null}
-            {exito.advertencias > 0 ? (
+            {exito.advertencias.precio > 0 ? (
               <p className="text-chico text-alerta">
-                {exito.advertencias} producto{exito.advertencias > 1 ? 's' : ''} se vendió a un precio
+                {exito.advertencias.precio} producto{exito.advertencias.precio > 1 ? 's' : ''} se vendió a un precio
                 distinto del catálogo.
+              </p>
+            ) : null}
+            {exito.advertencias.stockNegativo.length > 0 ? (
+              <p className="text-chico text-peligro">
+                El stock quedó en negativo: {exito.advertencias.stockNegativo.join(', ')}. Avisa al encargado para un recuento.
               </p>
             ) : null}
             <p className="text-chico text-lab3">Enter para seguir vendiendo.</p>
@@ -250,6 +295,41 @@ export function DialogoCobro({
             <p className="num mb-4 text-center text-cuerpo text-lab2">
               {falta > 0 ? `Falta por pagar: ${clp(falta)}` : 'Falta por pagar: $0'}
             </p>
+
+            {reservado ? (
+              <div className="mb-4 rounded-campo border border-peligro bg-bg p-3">
+                <p className="text-cuerpo font-semibold text-peligro">Reservado para un pedido web pagado</p>
+                <p className="mt-1 text-chico text-lab">
+                  «{reservado.descripcion}» figura agotado en la tienda online
+                  {reservado.desdeCache
+                    ? ' (dato del caché, sin conexión)'
+                    : minutosDesde(reservado.stockCanalEn) !== null
+                      ? ` (dato de hace ${minutosDesde(reservado.stockCanalEn)} min)`
+                      : ''}
+                  . Probablemente lo compró y pagó un cliente web, y ese pedido tiene prioridad sobre la venta en tienda.
+                </p>
+                <div className="mt-3 flex flex-col gap-2">
+                  <Boton variante="principal" onClick={quitarReservado}>
+                    Quitar de la venta
+                  </Boton>
+                  {puedeForzar ? (
+                    <>
+                      <Campo
+                        etiqueta="Vender igual (encargado): motivo"
+                        value={notaForzar}
+                        onChange={(e) => setNotaForzar(e.target.value)}
+                        placeholder="Ej.: cliente en caja, se avisa a la web"
+                      />
+                      <Boton variante="peligro" deshabilitado={!notaForzar.trim() || enviando} motivoDeshabilitado="Escribe el motivo." onClick={venderIgual}>
+                        Vender igual y dejar registro
+                      </Boton>
+                    </>
+                  ) : (
+                    <p className="text-chico text-lab3">Solo un encargado puede vender igual, con motivo.</p>
+                  )}
+                </div>
+              </div>
+            ) : null}
 
             <SelectorCliente
               cliente={cliente}

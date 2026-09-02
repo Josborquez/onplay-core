@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Prisma, TipoProducto } from '@prisma/client';
 import { PREFIJO_POR_TIPO } from '@onplay/dominio';
 import { prisma } from '../db.js';
+import { adjuntarStock } from '../stock/libro.js';
 import { ReservadorSku } from '../sync/importador.js';
 
 const TIPOS_VALIDOS = Object.keys(PREFIJO_POR_TIPO);
@@ -26,7 +27,7 @@ const SELECT_BUSQUEDA = {
 async function registrarAuditoria(
   usuarioId: string,
   entidadId: string,
-  accion: 'crear' | 'editar' | 'cambiar_precio',
+  accion: 'crear' | 'editar' | 'cambiar_precio' | 'ajustar_stock',
   valorAnterior: Prisma.InputJsonValue | undefined,
   valorNuevo: Prisma.InputJsonValue,
 ) {
@@ -78,7 +79,7 @@ export default async function rutasProductos(app: FastifyInstance) {
         skip: (pagina - 1) * limit,
         take: limit,
       });
-      return { productos, total, pagina, porPagina: limit, siguienteCursor: null };
+      return { productos: await adjuntarStock(prisma, productos), total, pagina, porPagina: limit, siguienteCursor: null };
     }
 
     const productos = await prisma.producto.findMany({
@@ -89,7 +90,7 @@ export default async function rutasProductos(app: FastifyInstance) {
     });
     const hayMas = productos.length > limit;
     if (hayMas) productos.pop();
-    return { productos, total, siguienteCursor: hayMas ? productos[productos.length - 1]!.id : null };
+    return { productos: await adjuntarStock(prisma, productos), total, siguienteCursor: hayMas ? productos[productos.length - 1]!.id : null };
   });
 
   // ---------- GET /productos/buscar — mostrador, máx 20 por relevancia, p95 < 200 ms ----------
@@ -147,7 +148,7 @@ export default async function rutasProductos(app: FastifyInstance) {
     const resultados = [...exactos, ...porNombre]
       .filter((p) => (vistos.has(p.id) ? false : (vistos.add(p.id), true)))
       .slice(0, 20);
-    return { resultados };
+    return { resultados: await adjuntarStock(prisma, resultados) }; // E2 §7.3
   });
 
   // ---------- GET /productos/catalogo-offline — caché de la PWA (F10), gzip vía @fastify/compress ----------
@@ -177,10 +178,12 @@ export default async function rutasProductos(app: FastifyInstance) {
           cardNumber: true,
           activo: true,
           imagenUrl: true,
+          controlaStock: true, // E2 §7.3
         },
         orderBy: { id: 'asc' },
       });
-      return { generadoEn, total: productos.length, productos };
+      // E2 §7.3: stockTotal/stockVenta/stockCanalMin/estadoStock en cada fila (esquema 3 del caché).
+      return { generadoEn, total: productos.length, productos: await adjuntarStock(prisma, productos) };
     },
   );
 
@@ -261,7 +264,7 @@ export default async function rutasProductos(app: FastifyInstance) {
 
   // ---------- PATCH /productos/:id — edición (F3), rol encargado ----------
   const CAMPOS_EDITABLES = [
-    'nombre', 'tipo', 'juego', 'categoriaId', 'precioVenta', 'controlaStock',
+    'nombre', 'tipo', 'juego', 'categoriaId', 'precioVenta', 'controlaStock', 'stockMinimo',
     'activo', 'posibleDuplicado', 'imagenUrl', 'codigoBarras', 'cardNumber', 'atributos',
   ] as const;
 
@@ -292,6 +295,18 @@ export default async function rutasProductos(app: FastifyInstance) {
       ) {
         return reply.code(422).send({ error: 'PRECIO_INVALIDO' });
       }
+      // E2 §5.2 / §7.1: stockMinimo entero >= 0; apagar controlaStock exige nota (M5).
+      if ('stockMinimo' in data && (!Number.isInteger(data.stockMinimo) || (data.stockMinimo as number) < 0)) {
+        return reply.code(422).send({ error: 'STOCK_MINIMO_INVALIDO', detalle: 'entero >= 0' });
+      }
+      if ('controlaStock' in data && typeof data.controlaStock !== 'boolean') {
+        return reply.code(422).send({ error: 'CUERPO_INVALIDO', detalle: 'controlaStock: boolean' });
+      }
+      const apagaControl = data.controlaStock === false && actual.controlaStock;
+      const notaControl = typeof b.nota === 'string' ? b.nota.trim() : '';
+      if (apagaControl && !notaControl) {
+        return reply.code(422).send({ error: 'NOTA_REQUERIDA', detalle: 'Apagar el control de stock exige una nota (M5)' });
+      }
 
       const producto = await prisma.producto.update({
         where: { id: actual.id },
@@ -313,9 +328,9 @@ export default async function rutasProductos(app: FastifyInstance) {
       await registrarAuditoria(
         req.user.sub,
         producto.id,
-        cambioPrecio ? 'cambiar_precio' : 'editar',
+        cambioPrecio ? 'cambiar_precio' : apagaControl ? 'ajustar_stock' : 'editar',
         anteriores as Prisma.InputJsonValue,
-        cambios as Prisma.InputJsonValue,
+        (apagaControl ? { ...cambios, nota: notaControl } : cambios) as Prisma.InputJsonValue,
       );
       return producto;
     },

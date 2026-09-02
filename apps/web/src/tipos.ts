@@ -59,10 +59,37 @@ export interface VentaCreada {
   pagos: { id: string; medio: MedioPago; monto: number; montoRecibido: number | null; referencia: string | null }[];
 }
 
+/** E2 §6.2: estado de stock de un producto. */
+export type EstadoStock = 'sin_control' | 'negativo' | 'quiebre' | 'bajo' | 'ok';
+
+/** E2 §7.3: resumen de stock que la API adjunta a listados, buscador y caché offline. */
+export interface ResumenStockProducto {
+  stockTotal: number | null; // null = no controla stock
+  stockVenta: number | null; // en la ubicación de venta
+  stockCanalMin: number | null; // espejo de solo lectura del canal (§6.8); nunca se suma (M6)
+  estadoStock: EstadoStock;
+}
+
+export type AdvertenciaVenta =
+  | { tipo: 'PRECIO_DISTINTO'; lineaIndex: number; precioActual: number; precioEnviado: number }
+  | { tipo: 'STOCK_NEGATIVO'; productoId: string; descripcion: string; ubicacion: string; cantidadNueva: number };
+
 export interface RespuestaVenta {
   venta: VentaCreada;
-  advertencias: { lineaIndex: number; precioActual: number; precioEnviado: number }[];
+  advertencias: AdvertenciaVenta[];
   repetida?: boolean;
+}
+
+/** 409 RESERVADO_WEB (E2 §6.9): la web ya vendió y cobró la última unidad. */
+export interface ReservadoWeb {
+  productoId: string;
+  descripcion: string;
+  canalId: string;
+  stockCanal: number | null;
+  stockCanalEn: string | null;
+  stockPropio: number;
+  /** true cuando el aviso salió del caché offline y no del servidor. */
+  desdeCache?: boolean;
 }
 
 /** Línea del carrito en pantalla. `precioCatalogo` permite la insignia "precio editado". */
@@ -123,7 +150,7 @@ export const ETIQUETA_TIPO: Record<TipoProducto, string> = {
 };
 
 /** Fila de GET /productos (listado del backoffice, V5). */
-export interface ProductoAdmin {
+export interface ProductoAdmin extends ResumenStockProducto {
   id: string;
   sku: string;
   nombre: string;
@@ -132,6 +159,7 @@ export interface ProductoAdmin {
   categoriaId: string | null;
   precioVenta: number;
   controlaStock: boolean;
+  stockMinimo: number;
   activo: boolean;
   posibleDuplicado: boolean;
   imagenUrl: string | null;
