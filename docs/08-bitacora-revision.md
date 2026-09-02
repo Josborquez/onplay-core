@@ -28,6 +28,7 @@
 | R-010 | 2026-09-02 | Datos / Importador | 236 cartas Magic de onplay.cl con SKU maestro `IND-` (tipo indeterminado) | Abierto (investigar) |
 | R-011 | 2026-09-02 | Riesgo de negocio | Sobreventa entre web y mostrador con poco stock (ha ocurrido en la vida real) | Agendado (E2/E3) — regla de prioridad decidida y escrita en 03 §6.9 y 06 §8.4 |
 | R-012 | 2026-09-02 | Backoffice (V5) | Tipo = Sellado + Categoría = Magic no muestra nada | Corregido (filtro Juego + categoría por subárbol) |
+| R-013 | 2026-09-02 | Etapa 2 | Cierre de E2: código completo, queda el recuento real (criterio 18) | Abierto (del dueño) |
 
 ---
 
@@ -150,6 +151,14 @@
 - **Qué pasaba:** no era un bug del filtro sino de la taxonomía de `02-SDD` §6.3: **todo el sellado vive en la categoría raíz «Sellado»** y el juego se guarda en `producto.juego` (string libre). «Magic» como categoría existe solo bajo «Cartas», así que la intersección Tipo = Sellado ∩ Categoría = Cartas > Magic es vacía por diseño (45 sellados de Magic tienen `categoria = sellado`, `juego = magic`). Además el filtro de categoría era exacto: elegir «Cartas» no traía a Magic ni a One Piece.
 - **Decisión:** (1) V5 gana el filtro **Juego**, alimentado por `GET /productos/juegos` (valores reales con conteo; la API ya aceptaba `juego`). Tipo = Sellado + Juego = Magic da los 45. (2) El filtro **Categoría pasa a subárbol** en `GET /productos` (elegir «Cartas» incluye sus hijas), igual que en `/stock` y `/recuentos`. (3) Cuando el cruce Sellado + una categoría de «Cartas» queda vacío, el mensaje explica dónde vive el sellado. No se mueve ningún producto de categoría: la taxonomía de la spec se mantiene.
 - **Archivos:** `apps/api/src/categorias.ts` (helper `idsSubarbol` compartido por productos/stock/recuentos), `apps/api/src/rutas/productos.ts`, `apps/web/src/pantallas/admin/Productos.tsx`.
+
+### R-013 · Cierre de la Etapa 2: código completo, queda el recuento real
+
+- **Fecha:** 2026-09-02. **Estado:** Abierto — depende del dueño.
+- **Qué se hizo:** Fases 1–5 de `03-SDD` implementadas en un día y verificadas criterio por criterio (17 de 18). Guía operativa para el encargado en `09-guia-inventario-encargado.md`. README y CLAUDE.md al día.
+- **Qué falta (criterio 18):** dos recuentos consecutivos de snacks y sellado que cuadren, hechos en la tienda. Es lo que declara «lista» la etapa según `01-SDD` §9. Se hace desde `/admin/recuentos` siguiendo la guía.
+- **Datos de prueba en dev que conviene limpiar antes de un recuento real:** SNK-000001 Coca-Cola, SNK-000002 Sprite y ACC-000079 Katana Red tienen movimientos de prueba (incluidos 1.000 ajustes «crit1 concurrencia»), ventas V-2026-00015..00023, devoluciones D-2026-00001/00002 y recuentos de prueba. En producción la base nace limpia; en dev, un recuento real los deja en el número correcto sin borrar nada (P9).
+- **Recordatorio de despliegue:** E2 se construyó en local (D-E2-6). Ponerla en producción exige que E1 lleve 7 días corridos (`02` criterio 11) y `npx prisma migrate deploy` con la migración `20260902195601_e2_inventario`.
 
 ---
 

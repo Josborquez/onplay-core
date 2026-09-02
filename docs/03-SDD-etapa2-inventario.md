@@ -4,7 +4,7 @@
 | | |
 |---|---|
 | **Versión** | 1.0 — 2026-09-02 |
-| **Estado** | Propuesta. Vinculante desde que el dueño ratifique la Fase 0 (§9) |
+| **Estado** | Vinculante. Fase 0 ratificada por el dueño el 2026-09-02 (regla de prioridad §6.9). **Fases 1–5 implementadas y verificadas el 2026-09-02** (commits `420bcc2`, `ca16f27`, `1fd4eaa`, `7b6d622`, `db75125`). Fase 6: documentación cerrada; **criterio 18 (recuento real) pendiente del dueño** |
 | **Precedentes** | `01-SDD-general.md` §3, §6.2, §9 · `02-SDD-etapa1-mostrador.md` · `07-SDD-etapa4-cliente-monedero.md` (formato) · `06-SDD-etapa3-sincronizacion.md` (lo que E3 exige de E2) · `08-bitacora-revision.md` R-009, R-011 |
 | **Resuelve** | O3 del SDD general: que exista un inventario real y auditable de lo que hay en la tienda |
 | **Referencias externas** | `onplay-erp` (cuarto intento): gate reservar→confirmar con `FOR UPDATE`, cola de excepciones · `OnplayPOS`: lo que NO hacer (stock absoluto a ciegas, ventas sin movimiento) |
@@ -492,6 +492,8 @@ README y CLAUDE.md al día; `docs/08` con lo aprendido; recuento real de snacks 
 16. La ficha V5 muestra el desglose por ubicación y el espejo del canal con su hora.
 17. `npm test` verde; `npm run build` limpio; los tests de arqueo de E1 pasan sin cambios de valor esperado cuando no hay devoluciones ni movimientos.
 18. **Depende del usuario:** dos recuentos consecutivos de snacks y sellado que cuadren (`01` §9).
+
+**Estado al cierre de la Fase 6 (2026-09-02):** 1 ✅ (1.000 movimientos concurrentes en 3 s, `POST /stock/verificar` sin diferencias) · 2 ✅ (grep: ninguna escritura de `StockActual` fuera de `libro.ts`) · 3 ✅ · 4 ✅ · 5 ✅ · 6 ✅ (misma `idempotencyKey` dos veces → un descuento) · 7 ✅ · 8 ✅ · 9 ✅ · 10 ✅ (el hash incluye `stockCanal`; corrida real 467/469) · 11 ✅ · 12 ✅ · 13 ✅ · 14 ✅ · 15 ✅ · 15b ✅ · 16 ✅ · 17 ✅ (103 tests, build limpio) · **18 pendiente del dueño**.
 
 ---
 

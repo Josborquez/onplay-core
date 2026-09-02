@@ -92,6 +92,20 @@ Con `NODE_ENV=production` la API sirve `apps/web/dist` en `/` (con fallback SPA 
 | `npm run seed` | Semillas idempotentes |
 | `npm run crear-admin -- <email> <nombre> [password]` | Primer usuario admin |
 
+## Etapa 2 — Inventario (2026-09-02)
+
+Spec: `docs/03-SDD-etapa2-inventario.md`. Guía para el encargado: `docs/09-guia-inventario-encargado.md`.
+
+- **Libro de stock** append-only (`MovimientoStock`) con resumen `StockActual` por producto y ubicación; el resumen solo lo escribe `apps/api/src/stock/libro.ts` (candado `FOR UPDATE`).
+- **Ubicaciones** semilla: `mostrador` (de venta), `carpetas`, `vitrina`, `bodega` (publicable para E3). `npm run seed` las crea.
+- **La venta descuenta** de la ubicación de venta los productos con `controlaStock`; nunca bloquea por stock propio (advierte `STOCK_NEGATIVO`). Regla de prioridad entre canales (03 §6.9): si la web ya vendió y cobró la última unidad, el cobro responde `409 RESERVADO_WEB`; un encargado puede seguir con `forzarReservado.nota`.
+- **Recuentos** (`/admin/recuentos`): por ubicación y categoría, escáner que suma 1, cerrar enciende el control solo en lo contado.
+- **Movimientos manuales** (`/admin/stock`): ajuste, merma, ingreso y traslado con nota obligatoria. **Alertas** (`/admin/stock/alertas`) y **CSV**.
+- **Espejo del stock de la web** (`ProductoCanal.stockCanal`) lo llena el mismo sync de E1; es solo lectura y nunca se suma al stock propio.
+- **Devoluciones** con folio `D-año-#####` desde `/admin/ventas` (salen de la caja abierta del encargado) y **movimientos de caja** (`Caja ±` en el Mostrador); ambos entran al arqueo.
+
+Rutas nuevas bajo `/api/v1`: `ubicaciones`, `stock`, `stock/alertas`, `stock/export.csv`, `stock/movimientos`, `stock/traslados`, `stock/verificar`, `productos/:id/stock`, `productos/:id/movimientos`, `recuentos*`, `ventas/:id/devoluciones`, `devoluciones`, `turnos/:id/movimientos-caja`.
+
 ## Estructura
 
 ```
