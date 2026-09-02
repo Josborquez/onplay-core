@@ -22,6 +22,8 @@
 | R-004 | 2026-09-02 | Datos del origen | Variación sin SKU en Woo (Katana Blue, id 2898) | Abierto (dato del canal) |
 | R-005 | 2026-09-02 | Mostrador (V2) | Accesos rápidos con pestañas fijas en vez de las categorías reales | Corregido (ajusta 05-SDD) |
 | R-006 | 2026-09-02 | Mostrador (V2) | Accesos rápidos: vista de lista con miniatura además de la grilla | Corregido (amplía 05-SDD §5.2) |
+| R-007 | 2026-09-02 | Mostrador (V2) | Panel de venta sin botón Eliminar en la línea | Corregido |
+| R-008 | 2026-09-02 | Backoffice (V18) | Sin forma de crear un cliente desde `/admin/clientes` | Corregido (amplía 07-SDD V18) |
 
 ---
 
@@ -83,6 +85,21 @@
 - **Cambio de contrato acotado:** `GET /productos/catalogo-offline` agrega `imagenUrl` a los campos de `02-SDD §5.2`. Es solo la URL (la imagen se descarga bajo demanda con `loading="lazy"`), así que el payload crece poco y el caché sigue siendo utilizable sin conexión. Para que las filas ya cacheadas reciban el campo, el caché lleva un número de esquema (`meta.esquema`, hoy 2): si no coincide, la próxima actualización baja el catálogo completo una sola vez y luego vuelve al delta `?desde`.
 - **Archivos:** `apps/api/src/rutas/productos.ts` (select del offline), `apps/web/src/catalogo.ts` (`imagenUrl` opcional en `ProductoCache`, `ESQUEMA_CATALOGO`), `apps/web/src/components/AccesoRapido.tsx` (`ConmutadorVista`, `FilaProducto`, `Miniatura`).
 - **Agendado (E3):** las imágenes vienen de los sitios Woo; si algún día se sirven desde `onplay-core`, cambiar solo la URL en el importador.
+
+### R-007 · Panel de venta sin botón Eliminar en la línea
+
+- **Fecha:** 2026-09-02. **Estado:** Corregido. Pedido del dueño durante la revisión visual.
+- **Qué pasaba:** la única forma de sacar una línea del carrito era bajar la cantidad con «−» hasta cero. Con 3 o 4 unidades son varios toques y no es evidente que «−» en 1 elimina.
+- **Decisión:** botón **Eliminar** (ícono papelera) al final de cada línea, junto al precio unitario. Con cantidad 1 quita de inmediato. Con cantidad mayor pide un segundo toque en línea («¿Quitar 3?» en rojo, se desarma solo a los 5 s), que es la «confirmación solo si la cantidad era mayor que 1» de 05-SDD §7.1 sin diálogo modal. El «−» conserva su comportamiento.
+- **Archivos:** `apps/web/src/components/PanelVenta.tsx` (`LineaVenta`); usa el `onEliminar` que ya existía en `Mostrador.tsx`.
+
+### R-008 · Sin forma de crear un cliente desde `/admin/clientes`
+
+- **Fecha:** 2026-09-02. **Estado:** Corregido. Surgió de la pregunta del dueño «¿cómo agregar un cliente para los créditos de tienda?».
+- **Qué pasaba:** 07-SDD define el alta de cliente solo en el mostrador (C1, dos campos dentro del cobro) y V18 como tabla de consulta. Un encargado que quería registrar a alguien y darle saldo sin una venta de por medio no tenía botón: debía abrir el cobro del mostrador con un carrito vacío.
+- **Decisión:** botón **Nuevo cliente** en el encabezado de V18 que abre un diálogo con nombre (obligatorio), RUT, teléfono y correo (opcionales). Usa el mismo `POST /clientes` del mostrador (validación de RUT, duplicados §6.6: alta → 409, media/baja → crea). Al crear navega a la ficha, que es donde vive «Cargar saldo». El diálogo recuerda el circuito del saldo: con dinero se cobra en el mostrador como venta de `SRV-000001` (§6.3, entra al arqueo); premios y ajustes van por V17 desde la ficha.
+- **Fuera de alcance:** el «crédito» (`permiteCredito`/`limiteCredito`, C8) sigue en la Fase 5 BLOQUEADA; la ficha solo lo muestra.
+- **Archivos:** `apps/web/src/pantallas/admin/Clientes.tsx` (`DialogoNuevoCliente`).
 
 ---
 

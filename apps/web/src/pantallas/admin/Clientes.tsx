@@ -4,9 +4,9 @@
 // última importación (§7.3): vincular es SIEMPRE una decisión del encargado,
 // y una cuenta sin coincidencia se crea a mano, nunca sola.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ErrorApi, api } from '../../api.js';
-import { Banner, Boton, Cargando, Insignia, Vacio } from '../../components/base.js';
+import { Banner, Boton, Campo, Cargando, Dialogo, Insignia, Vacio } from '../../components/base.js';
 import {
   ETIQUETA_ORIGEN,
   type CandidatosCanal,
@@ -44,6 +44,90 @@ function idsDuplicados(clientes: ClienteAdmin[]): Set<string> {
     if (ids.length > 1) ids.forEach((id) => marcados.add(id));
   }
   return marcados;
+}
+
+/** R-008: alta de cliente desde el backoffice. Mismo `POST /clientes` que el mostrador (C1),
+ * con RUT y correo opcionales; al crear, va a la ficha, donde vive «Cargar saldo». */
+function DialogoNuevoCliente({ abierto, onCerrar }: { abierto: boolean; onCerrar: () => void }) {
+  const navigate = useNavigate();
+  const [nombre, setNombre] = useState('');
+  const [rut, setRut] = useState('');
+  const [telefono, setTelefono] = useState('');
+  const [email, setEmail] = useState('');
+  const [error, setError] = useState('');
+  const [guardando, setGuardando] = useState(false);
+
+  useEffect(() => {
+    if (!abierto) return;
+    setNombre('');
+    setRut('');
+    setTelefono('');
+    setEmail('');
+    setError('');
+  }, [abierto]);
+
+  const crear = async () => {
+    const n = nombre.trim();
+    if (n === '') {
+      setError('El nombre es obligatorio.');
+      return;
+    }
+    setGuardando(true);
+    setError('');
+    try {
+      const r = await api<{ cliente: { id: string } }>('/clientes', {
+        method: 'POST',
+        body: JSON.stringify({
+          nombre: n,
+          ...(rut.trim() ? { rut: rut.trim() } : {}),
+          ...(telefono.trim() ? { telefono: telefono.trim() } : {}),
+          ...(email.trim() ? { email: email.trim() } : {}),
+        }),
+      });
+      onCerrar();
+      navigate(`/clientes/${r.cliente.id}`);
+    } catch (e) {
+      if (e instanceof ErrorApi && e.codigo === 'CLIENTE_DUPLICADO') {
+        setError('Ya existe un cliente con ese RUT o correo. Búscalo en la lista.');
+      } else if (e instanceof ErrorApi && e.codigo === 'RUT_INVALIDO') {
+        setError('Ese RUT no es válido. Revisa el dígito verificador.');
+      } else {
+        setError('No se pudo crear el cliente. Intenta de nuevo.');
+      }
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  return (
+    <Dialogo abierto={abierto} titulo="Nuevo cliente" onCerrar={onCerrar}>
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void crear();
+        }}
+      >
+        <Campo etiqueta="Nombre" value={nombre} onChange={(e) => setNombre(e.target.value)} autoFocus required />
+        <div className="grid grid-cols-2 gap-3">
+          <Campo etiqueta="RUT (opcional)" value={rut} onChange={(e) => setRut(e.target.value)} placeholder="12345678-9" />
+          <Campo etiqueta="Teléfono (opcional)" value={telefono} onChange={(e) => setTelefono(e.target.value)} inputMode="tel" />
+        </div>
+        <Campo etiqueta="Correo (opcional)" value={email} onChange={(e) => setEmail(e.target.value)} type="email" />
+        <p className="text-chico text-lab3">
+          El saldo se carga después, desde la ficha: con dinero se cobra en el mostrador como «Carga de
+          saldo»; premios y ajustes van por «Cargar saldo» de la ficha.
+        </p>
+        {error ? <p className="text-chico text-peligro">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Boton onClick={onCerrar}>Cancelar</Boton>
+          <Boton variante="principal" type="submit" cargando={guardando}>
+            Crear y abrir ficha
+          </Boton>
+        </div>
+      </form>
+    </Dialogo>
+  );
 }
 
 function FilaCliente({ c, duplicado }: { c: ClienteAdmin; duplicado: boolean }) {
@@ -189,6 +273,7 @@ export function Clientes() {
   const [filtro, setFiltro] = useState<Filtro>('todos');
   const [orden, setOrden] = useState('');
   const [q, setQ] = useState('');
+  const [nuevoAbierto, setNuevoAbierto] = useState(false);
   const [datos, setDatos] = useState<RespuestaClientes | null>(null);
   const [candidatos, setCandidatos] = useState<CandidatosCanal[] | null>(null);
   const [error, setError] = useState(false);
@@ -226,7 +311,15 @@ export function Clientes() {
 
   return (
     <div className="p-4">
-      <Encabezado titulo="Clientes" />
+      <Encabezado
+        titulo="Clientes"
+        extra={
+          <Boton variante="principal" onClick={() => setNuevoAbierto(true)}>
+            Nuevo cliente
+          </Boton>
+        }
+      />
+      <DialogoNuevoCliente abierto={nuevoAbierto} onCerrar={() => setNuevoAbierto(false)} />
 
       {error ? (
         <div className="mb-3">

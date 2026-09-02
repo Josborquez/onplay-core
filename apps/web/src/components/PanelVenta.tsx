@@ -1,6 +1,6 @@
 // Panel de venta (05-SDD V2 §7.1): líneas con pasos −/+, precio editable con
 // insignia, descuento global en pesos con tope, total en --t-total y Cobrar de 50 px.
-import { memo, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import type { LineaCarrito } from '../tipos.js';
 import { clp } from '../utils/formato.js';
 import { Boton, CampoMonto, Insignia } from './base.js';
@@ -19,6 +19,22 @@ export const LineaVenta = memo(function LineaVenta({
   const [editando, setEditando] = useState(false);
   const [borrador, setBorrador] = useState<number | ''>(linea.precioUnitario);
   const editado = linea.precioCatalogo !== null && linea.precioUnitario !== linea.precioCatalogo;
+
+  // R-007: botón Eliminar explícito. Con cantidad > 1 pide un segundo toque (05-SDD §7.1:
+  // «confirmación solo si la cantidad era mayor que 1»), en línea y sin diálogo modal.
+  const [confirmando, setConfirmando] = useState(false);
+  useEffect(() => {
+    if (!confirmando) return;
+    const id = setTimeout(() => setConfirmando(false), 5000);
+    return () => clearTimeout(id);
+  }, [confirmando]);
+  const eliminar = () => {
+    if (linea.cantidad <= 1 || confirmando) {
+      onEliminar(linea.clave);
+      return;
+    }
+    setConfirmando(true);
+  };
 
   const menos = () => {
     if (linea.cantidad <= 1) {
@@ -61,6 +77,7 @@ export const LineaVenta = memo(function LineaVenta({
             +
           </button>
         </div>
+        <div className="flex items-center gap-1">
         {editando ? (
           <div className="w-[128px]">
             <CampoMonto
@@ -94,6 +111,40 @@ export const LineaVenta = memo(function LineaVenta({
             {clp(linea.precioUnitario)} c/u
           </button>
         )}
+        <button
+          type="button"
+          onClick={eliminar}
+          aria-label={confirmando ? `Confirmar quitar ${linea.descripcion}` : `Eliminar ${linea.descripcion}`}
+          title="Eliminar de la venta"
+          className={`flex h-[36px] shrink-0 items-center justify-center gap-1 rounded border px-2 text-chico transition-colors ${
+            confirmando
+              ? 'border-peligro bg-bg text-peligro font-semibold'
+              : 'border-sep bg-bg text-lab2 hover:border-peligro hover:text-peligro'
+          }`}
+        >
+          {confirmando ? (
+            <>¿Quitar {linea.cantidad}?</>
+          ) : (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 6h18" />
+              <path d="M8 6V4h8v2" />
+              <path d="M19 6l-1 14H6L5 6" />
+              <path d="M10 11v6M14 11v6" />
+            </svg>
+          )}
+        </button>
+        </div>
       </div>
       {editado ? (
         <div className="mt-1 text-right">
