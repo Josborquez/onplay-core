@@ -14,6 +14,8 @@ import { AltaSnack } from './pantallas/admin/AltaSnack.js';
 import { Auditoria } from './pantallas/admin/Auditoria.js';
 import { Clientes } from './pantallas/admin/Clientes.js';
 import { Duplicados } from './pantallas/admin/Duplicados.js';
+import { Stock } from './pantallas/admin/Stock.js';
+import { Recuentos, RecuentoDetalle } from './pantallas/admin/Recuentos.js';
 import { Productos } from './pantallas/admin/Productos.js';
 import { Sync } from './pantallas/admin/Sync.js';
 import { TurnosAdmin } from './pantallas/admin/TurnosAdmin.js';
@@ -116,6 +118,9 @@ export function App() {
           <Route path="/admin" element={<Navigate to="/admin/productos" replace />} />
           <Route path="/admin/productos" element={admin(<Productos />)} />
           <Route path="/admin/snacks" element={admin(<AltaSnack />)} />
+          <Route path="/admin/stock" element={admin(<Stock />)} />
+          <Route path="/admin/recuentos" element={admin(<Recuentos />)} />
+          <Route path="/admin/recuentos/:id" element={admin(<RecuentoDetalle />)} />
           <Route path="/admin/ventas" element={admin(<VentasAdmin />)} />
           <Route path="/admin/turnos" element={admin(<TurnosAdmin />)} />
           <Route path="/admin/clientes" element={admin(<Clientes />)} />

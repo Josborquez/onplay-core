@@ -2,8 +2,9 @@
 // Los movimientos manuales, traslados y recuentos llegan en la Fase 3 (§6.4, §6.5).
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
-import { ErrorStock, resumenStock, stockPorUbicacion } from '../stock/libro.js';
-import { avisoWeb, type EstadoStock } from '@onplay/dominio';
+import { ErrorStock, bloquearStock, registrarMovimiento, resumenStock, stockPorUbicacion } from '../stock/libro.js';
+import { avisoWeb, firmarCantidadManual, type EstadoStock, type MotivoStock } from '@onplay/dominio';
+import { randomUUID } from 'node:crypto';
 
 const ESTADOS: EstadoStock[] = ['sin_control', 'negativo', 'quiebre', 'bajo', 'ok'];
 
@@ -201,6 +202,114 @@ export default async function rutasStock(app: FastifyInstance) {
       return { movimientos, total, pagina, porPagina: limit };
     },
   );
+
+  // ---------- Movimientos manuales (C5, §6.5): ajuste, merma, compra ----------
+  interface CuerpoMovimiento {
+    productoId?: unknown;
+    ubicacionId?: unknown;
+    cantidad?: unknown;
+    motivo?: unknown;
+    nota?: unknown;
+  }
+
+  app.post<{ Body: CuerpoMovimiento }>('/stock/movimientos', encargado, async (req, reply) => {
+    const b = req.body ?? {};
+    if (typeof b.productoId !== 'string' || typeof b.ubicacionId !== 'string') {
+      return reply.code(422).send({ error: 'CUERPO_INVALIDO', detalle: 'productoId y ubicacionId: string' });
+    }
+    if (!Number.isInteger(b.cantidad)) return reply.code(422).send({ error: 'CANTIDAD_INVALIDA', detalle: 'entero' });
+    const firmado = firmarCantidadManual(b.motivo as MotivoStock, b.cantidad as number);
+    if ('codigo' in firmado) return reply.code(422).send({ error: firmado.codigo, detalle: firmado.detalle });
+    const nota = typeof b.nota === 'string' ? b.nota.trim() : '';
+    const [producto, ubicacion] = await Promise.all([
+      prisma.producto.findUnique({ where: { id: b.productoId }, select: { id: true, nombre: true, tipo: true, controlaStock: true } }),
+      prisma.ubicacion.findUnique({ where: { id: b.ubicacionId } }),
+    ]);
+    if (!producto) return reply.code(422).send({ error: 'PRODUCTO_NO_ENCONTRADO' });
+    if (producto.tipo === 'servicio') return reply.code(422).send({ error: 'PRODUCTO_SIN_STOCK', detalle: 'Un servicio no tiene stock' });
+    if (!ubicacion || !ubicacion.activa) return reply.code(422).send({ error: 'UBICACION_NO_ENCONTRADA' });
+    // M5: ajuste y merma exigen control ya encendido; solo un ingreso (compra) lo enciende.
+    if (!producto.controlaStock && b.motivo !== 'compra') {
+      return reply.code(422).send({ error: 'SIN_CONTROL_STOCK', detalle: 'Primero un recuento o un ingreso (M5)' });
+    }
+
+    const resultado = await prisma.$transaction(async (tx) => {
+      const r = await registrarMovimiento(tx, {
+        productoId: producto.id,
+        ubicacionId: ubicacion.id,
+        cantidad: firmado.cantidad,
+        motivo: b.motivo as MotivoStock,
+        referenciaTipo: 'ajuste',
+        nota,
+        usuarioId: req.user.sub,
+      });
+      // M5: un ingreso (compra) sobre un producto sin control lo enciende, con auditoría.
+      let encendido = false;
+      if (!producto.controlaStock && b.motivo === 'compra') {
+        await tx.producto.update({ where: { id: producto.id }, data: { controlaStock: true } });
+        await tx.auditoria.create({
+          data: {
+            usuarioId: req.user.sub,
+            entidad: 'producto',
+            entidadId: producto.id,
+            accion: 'ajustar_stock',
+            valorAnterior: { controlaStock: false },
+            valorNuevo: { controlaStock: true, motivo: 'primer ingreso', movimientoId: r.movimientoId },
+          },
+        });
+        encendido = true;
+      }
+      return { ...r, encendido };
+    });
+    return reply.code(201).send({ ...resultado, ubicacion: ubicacion.codigo, producto: producto.nombre });
+  });
+
+  // ---------- Traslados (C5, §6.5, M4): dos filas, misma referencia, una transacción ----------
+  interface CuerpoTraslado {
+    productoId?: unknown;
+    desdeUbicacionId?: unknown;
+    hastaUbicacionId?: unknown;
+    cantidad?: unknown;
+    nota?: unknown;
+  }
+
+  app.post<{ Body: CuerpoTraslado }>('/stock/traslados', encargado, async (req, reply) => {
+    const b = req.body ?? {};
+    if (typeof b.productoId !== 'string' || typeof b.desdeUbicacionId !== 'string' || typeof b.hastaUbicacionId !== 'string') {
+      return reply.code(422).send({ error: 'CUERPO_INVALIDO', detalle: 'productoId, desdeUbicacionId, hastaUbicacionId: string' });
+    }
+    if (b.desdeUbicacionId === b.hastaUbicacionId) return reply.code(422).send({ error: 'MISMA_UBICACION' });
+    if (!Number.isInteger(b.cantidad) || (b.cantidad as number) <= 0) {
+      return reply.code(422).send({ error: 'CANTIDAD_INVALIDA', detalle: 'entero > 0' });
+    }
+    const nota = typeof b.nota === 'string' ? b.nota.trim() : '';
+    if (!nota) return reply.code(422).send({ error: 'NOTA_REQUERIDA' });
+    const [producto, desde, hasta] = await Promise.all([
+      prisma.producto.findUnique({ where: { id: b.productoId }, select: { id: true, nombre: true, controlaStock: true } }),
+      prisma.ubicacion.findUnique({ where: { id: b.desdeUbicacionId } }),
+      prisma.ubicacion.findUnique({ where: { id: b.hastaUbicacionId } }),
+    ]);
+    if (!producto) return reply.code(422).send({ error: 'PRODUCTO_NO_ENCONTRADO' });
+    if (!desde?.activa || !hasta?.activa) return reply.code(422).send({ error: 'UBICACION_NO_ENCONTRADA' });
+    if (!producto.controlaStock) return reply.code(422).send({ error: 'SIN_CONTROL_STOCK', detalle: 'Primero un recuento o un ingreso (M5)' });
+
+    const cantidad = b.cantidad as number;
+    const referenciaId = randomUUID();
+    const resultado = await prisma.$transaction(async (tx) => {
+      // Candados en orden ascendente de ubicacionId (§6.1), luego los dos movimientos.
+      for (const u of [desde.id, hasta.id].sort()) await bloquearStock(tx, producto.id, u);
+      const salida = await registrarMovimiento(tx, {
+        productoId: producto.id, ubicacionId: desde.id, cantidad: -cantidad, motivo: 'traslado',
+        referenciaTipo: 'traslado', referenciaId, nota, usuarioId: req.user.sub,
+      });
+      const entrada = await registrarMovimiento(tx, {
+        productoId: producto.id, ubicacionId: hasta.id, cantidad, motivo: 'traslado',
+        referenciaTipo: 'traslado', referenciaId, nota, usuarioId: req.user.sub,
+      });
+      return { referenciaId, salida, entrada };
+    });
+    return reply.code(201).send({ ...resultado, producto: producto.nombre, desde: desde.codigo, hasta: hasta.codigo });
+  });
 
   // Verificación M1 (§6.2): compara el resumen con SUM(movimientos). Solo reporta.
   app.post('/stock/verificar', admin, async () => {

@@ -11,6 +11,8 @@ const ITEMS: { a: string; etiqueta: string; icono: string; rol: RolUsuario }[] =
   { a: '/mis-ventas', etiqueta: 'Mis ventas', icono: '◍', rol: 'vendedor' },
   { a: '/admin/productos', etiqueta: 'Productos', icono: '▤', rol: 'encargado' },
   { a: '/admin/snacks', etiqueta: 'Alta de snack', icono: '⊞', rol: 'encargado' },
+  { a: '/admin/stock', etiqueta: 'Stock', icono: '▥', rol: 'encargado' }, // E2 V19
+  { a: '/admin/recuentos', etiqueta: 'Recuentos', icono: '☑', rol: 'encargado' }, // E2 V20
   { a: '/admin/ventas', etiqueta: 'Ventas', icono: '◈', rol: 'encargado' },
   { a: '/admin/turnos', etiqueta: 'Turnos', icono: '▦', rol: 'encargado' },
   { a: '/admin/clientes', etiqueta: 'Clientes', icono: '◉', rol: 'encargado' },
