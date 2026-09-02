@@ -12,7 +12,16 @@ export interface ProductoCache {
   codigoBarras: string | null;
   cardNumber: string | null;
   activo: boolean;
+  /** URL de la imagen en el canal (R-006). Puede faltar en filas cacheadas con esquema viejo. */
+  imagenUrl?: string | null;
 }
+
+/**
+ * Versión de los campos que trae `catalogo-offline`. Si cambia, el delta `?desde` no basta
+ * (las filas viejas no tendrían el campo nuevo): se baja el catálogo completo una vez.
+ * 1 = §5.2 original · 2 = + imagenUrl (R-006).
+ */
+const ESQUEMA_CATALOGO = 2;
 
 export interface Categoria {
   id: string;
@@ -81,7 +90,10 @@ export async function hidratarCatalogo(): Promise<void> {
 
 export async function refrescarCatalogo(): Promise<void> {
   const db = await abrirDb();
-  const desde = await tx<string | undefined>(db, META, 'readonly', (s) => s.get('desde') as IDBRequest<string | undefined>);
+  const esquema = await tx<number | undefined>(db, META, 'readonly', (s) => s.get('esquema') as IDBRequest<number | undefined>);
+  const desdeGuardado = await tx<string | undefined>(db, META, 'readonly', (s) => s.get('desde') as IDBRequest<string | undefined>);
+  // Esquema distinto → descarga completa (una vez), luego se vuelve al delta.
+  const desde = esquema === ESQUEMA_CATALOGO ? desdeGuardado : undefined;
   try {
     const q = desde ? `?desde=${encodeURIComponent(desde)}` : '';
     const r = await api<{ generadoEn: string; productos: ProductoCache[] }>(`/productos/catalogo-offline${q}`);
@@ -90,6 +102,7 @@ export async function refrescarCatalogo(): Promise<void> {
       const almacen = escritura.objectStore(ALMACEN);
       for (const p of r.productos) almacen.put(p);
       escritura.objectStore(META).put(r.generadoEn, 'desde');
+      escritura.objectStore(META).put(ESQUEMA_CATALOGO, 'esquema');
       await new Promise((res, rej) => {
         escritura.oncomplete = res;
         escritura.onerror = () => rej(escritura.error);
@@ -99,6 +112,7 @@ export async function refrescarCatalogo(): Promise<void> {
     } else {
       const escritura = db.transaction(META, 'readwrite');
       escritura.objectStore(META).put(r.generadoEn, 'desde');
+      escritura.objectStore(META).put(ESQUEMA_CATALOGO, 'esquema');
     }
   } catch {
     // Sin conexión: se sigue con lo que haya en el caché.
@@ -141,13 +155,38 @@ export function productosDeCategorias(ids: Set<string>, tope = 60): ProductoCach
     .slice(0, tope);
 }
 
+/** Cantidad de productos activos del caché dentro de un conjunto de categorías. */
+export function contarProductos(ids: Set<string>): number {
+  let n = 0;
+  for (const p of indice) if (p.categoriaId && ids.has(p.categoriaId)) n += 1;
+  return n;
+}
+
 let arbolCategorias: Categoria[] | null = null;
 
+/**
+ * Árbol de categorías. Se pide al servidor y se guarda en IndexedDB (`meta.categorias`)
+ * para que los accesos rápidos funcionen sin conexión (P8, R-005).
+ */
 export async function categorias(): Promise<Categoria[]> {
   if (arbolCategorias) return arbolCategorias;
-  const r = await api<{ categorias: Categoria[] }>('/categorias');
-  arbolCategorias = r.categorias;
-  return arbolCategorias;
+  try {
+    const r = await api<{ categorias: Categoria[] }>('/categorias');
+    arbolCategorias = r.categorias;
+    try {
+      const db = await abrirDb();
+      await tx(db, META, 'readwrite', (s) => s.put(arbolCategorias, 'categorias'));
+    } catch {
+      /* sin IndexedDB se sigue con el árbol en memoria */
+    }
+    return arbolCategorias;
+  } catch (e) {
+    const db = await abrirDb();
+    const guardado = await tx<Categoria[] | undefined>(db, META, 'readonly', (s) => s.get('categorias') as IDBRequest<Categoria[] | undefined>);
+    if (!guardado) throw e;
+    arbolCategorias = guardado;
+    return guardado;
+  }
 }
 
 /** Ids de una categoría raíz (por slug) y todas sus descendientes. */

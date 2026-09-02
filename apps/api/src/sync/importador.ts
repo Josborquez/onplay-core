@@ -1,6 +1,7 @@
 // Importador de catálogo F1 — 02-SDD §6.
 // dryRun=true por defecto (regla S1): no escribe productos ni reserva correlativos.
 import { createHash } from 'node:crypto';
+import type { Prisma } from '@prisma/client';
 import {
   PREFIJO_POR_TIPO,
   formatearSkuCorrelativo,
@@ -19,6 +20,13 @@ import {
 import { prisma } from '../db.js';
 import { entorno } from '../entorno.js';
 import { mapearOnplay, mapearOnplaygames, type ResultadoMapeo } from './mapeo.js';
+import {
+  CLAVE_PADRE_EXTERNO,
+  CLAVE_VARIANTE,
+  codigoBarrasDesdeSku,
+  nombreDeVariacion,
+  textoDeVariante,
+} from './variaciones.js';
 
 export type CanalWoo = 'onplay_cl' | 'onplaygames_cl';
 export const CANALES_WOO: CanalWoo[] = ['onplay_cl', 'onplaygames_cl'];
@@ -116,19 +124,29 @@ async function construirItems(
     const variaciones = await cliente.listarVariaciones(p.id);
     return variaciones.map((v) => {
       const precio = parsearPrecio(v.price, v.regular_price);
-      const opciones = (v.attributes ?? [])
-        .map((a) => a.option)
-        .filter(Boolean)
-        .join(' / ');
+      const opciones = (v.attributes ?? []).map((a) => a.option).filter(Boolean);
+      const externoSku = v.sku || `${p.sku || String(p.id)}-V${v.id}`;
+      // R-003: cada variación recuerda a su padre y su variante limpia (E2/E3 lo necesitan).
+      const atributos: Record<string, string> = {
+        ...(meta.atributos ?? {}),
+        [CLAVE_PADRE_EXTERNO]: String(p.id),
+      };
+      const variante = opciones.map((o) => textoDeVariante(p.name, o)).join(' / ');
+      if (variante) atributos[CLAVE_VARIANTE] = variante;
       return {
         externoId: v.id,
-        externoSku: v.sku || `${p.sku || String(p.id)}-V${v.id}`,
-        nombre: opciones ? `${p.name} — ${opciones}` : p.name,
+        externoSku,
+        nombre: nombreDeVariacion(p.name, opciones), // R-001: sin repetir el padre
         precio: precio ?? 0,
         sinPrecio: precio === null,
         imagenUrl: v.image?.src ?? imagenPadre,
         mapeo,
-        meta,
+        meta: {
+          ...meta,
+          // R-002: el SKU de la variación suele ser el EAN del fabricante.
+          codigoBarras: meta.codigoBarras ?? codigoBarrasDesdeSku(v.sku),
+          atributos,
+        },
       };
     });
   }
@@ -143,7 +161,7 @@ async function construirItems(
       sinPrecio: precio === null,
       imagenUrl: imagenPadre,
       mapeo,
-      meta,
+      meta: { ...meta, codigoBarras: meta.codigoBarras ?? codigoBarrasDesdeSku(p.sku) },
     },
   ];
 }
@@ -191,8 +209,47 @@ export class ReservadorSku {
 /** Hash de los campos que la sincronización mantiene (§6.5): si no cambió, se omite. */
 function hashDeSync(item: ItemImportable): string {
   return createHash('sha1')
-    .update(JSON.stringify([item.nombre, item.precio, item.imagenUrl]))
+    .update(
+      JSON.stringify([
+        item.nombre,
+        item.precio,
+        item.imagenUrl,
+        // R-002/R-003: entran al hash para que una corrida completa los rellene
+        // en productos ya importados (solo se completan si faltan, nunca se pisan).
+        item.meta.codigoBarras,
+        item.meta.atributos?.[CLAVE_PADRE_EXTERNO] ?? null,
+        item.meta.atributos?.[CLAVE_VARIANTE] ?? null,
+      ]),
+    )
     .digest('hex');
+}
+
+/**
+ * Datos que una actualización COMPLETA si faltan, sin pisar correcciones manuales (§6.5):
+ * `codigoBarras` solo si está vacío; en `atributos` solo las claves de variación ausentes.
+ */
+function completarFaltantes(
+  actual: { codigoBarras: string | null; atributos: Prisma.JsonValue },
+  item: ItemImportable,
+): { codigoBarras?: string; atributos?: Prisma.InputJsonValue } {
+  const data: { codigoBarras?: string; atributos?: Prisma.InputJsonValue } = {};
+  if (!actual.codigoBarras && item.meta.codigoBarras) data.codigoBarras = item.meta.codigoBarras;
+
+  const existentes =
+    actual.atributos && typeof actual.atributos === 'object' && !Array.isArray(actual.atributos)
+      ? (actual.atributos as Record<string, unknown>)
+      : {};
+  const nuevos: Record<string, unknown> = { ...existentes };
+  let cambio = false;
+  for (const clave of [CLAVE_PADRE_EXTERNO, CLAVE_VARIANTE]) {
+    const valor = item.meta.atributos?.[clave];
+    if (valor && !(clave in existentes)) {
+      nuevos[clave] = valor;
+      cambio = true;
+    }
+  }
+  if (cambio) data.atributos = nuevos as Prisma.InputJsonValue;
+  return data;
 }
 
 interface ContextoImportacion {
@@ -235,12 +292,22 @@ async function procesarItem(
   if (pc) {
     if (pc.hashUltimoSync === hash) return 'omitido';
     // §6.5: solo nombre, precio, imagen y publicado. No tocar tipo/categoría/atributos
-    // (evita revertir correcciones manuales).
+    // (evita revertir correcciones manuales). Excepción acotada (R-002/R-003): se COMPLETAN
+    // codigoBarras y las claves de variación cuando faltan; nunca se sobrescriben.
     if (!dryRun) {
+      const actual = await prisma.producto.findUniqueOrThrow({
+        where: { id: pc.productoId },
+        select: { codigoBarras: true, atributos: true },
+      });
       await prisma.$transaction([
         prisma.producto.update({
           where: { id: pc.productoId },
-          data: { nombre: item.nombre, precioVenta: item.precio, imagenUrl: item.imagenUrl },
+          data: {
+            nombre: item.nombre,
+            precioVenta: item.precio,
+            imagenUrl: item.imagenUrl,
+            ...completarFaltantes(actual, item),
+          },
         }),
         prisma.productoCanal.update({
           where: { id: pc.id },

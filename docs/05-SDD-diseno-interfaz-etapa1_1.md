@@ -324,6 +324,8 @@ El alta exige rol `encargado` (`02` §5.2); ofrecérsela a un vendedor producir�
 
 Control segmentado con `Snacks`, `Sellado`, `Cartas`. Abre una grilla táctil **ordenada alfabéticamente** y resuelta contra el caché local, para que funcione sin conexión.
 
+> **Ajuste R-005 (2026-09-02, `08-bitacora-revision.md`):** las pestañas ya no son fijas: son las categorías raíz reales con productos en el caché, y las subcategorías con productos aparecen como filtros con conteo. La regla de «Cartas» de abajo se generaliza a cualquier selección con más de 60 productos y subcategorías.
+
 `Cartas` **no** despliega la categoría completa: son más de 2.100 productos (`02` §6.1) y una grilla de ese tamaño no sirve. Muestra primero las subcategorías (Magic, One Piece, Pokémon…) y dentro de cada una, máximo 60 productos con el aviso *"Usa el buscador para encontrar una carta puntual."*
 
 #### El panel de venta

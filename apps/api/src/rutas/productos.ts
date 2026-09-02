@@ -149,7 +149,8 @@ export default async function rutasProductos(app: FastifyInstance) {
       const generadoEn = new Date().toISOString();
       const productos = await prisma.producto.findMany({
         where: desde ? { actualizadoEn: { gt: desde } } : {},
-        // Campos exactos de §5.2 — el payload offline es deliberadamente mínimo.
+        // Campos de §5.2 (payload deliberadamente mínimo) + imagenUrl (R-006: miniaturas
+        // en la lista de accesos rápidos; es solo la URL, la imagen se carga bajo demanda).
         select: {
           id: true,
           sku: true,
@@ -159,6 +160,7 @@ export default async function rutasProductos(app: FastifyInstance) {
           codigoBarras: true,
           cardNumber: true,
           activo: true,
+          imagenUrl: true,
         },
         orderBy: { id: 'asc' },
       });
