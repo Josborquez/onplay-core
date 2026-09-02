@@ -34,6 +34,10 @@ export interface ProductoWoo {
   categories: CategoriaDeProductoWoo[];
   meta_data: MetaDatoWoo[];
   variations: number[];
+  // E2 §6.8 — espejo de solo lectura. Woo descuenta stock_quantity solo al pasar a pagado.
+  manage_stock?: boolean;
+  stock_quantity?: number | null;
+  stock_status?: string; // instock | outofstock | onbackorder
 }
 
 /** Usuario de wc/v3/customers (E4 §7.3). El `id` ES el externoUserId de ClienteCanal. */
@@ -58,4 +62,7 @@ export interface VariacionWoo {
   regular_price: string;
   attributes: AtributoVariacionWoo[];
   image?: ImagenWoo | null;
+  manage_stock?: boolean | 'parent';
+  stock_quantity?: number | null;
+  stock_status?: string;
 }

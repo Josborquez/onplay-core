@@ -108,6 +108,22 @@ interface ItemImportable {
   imagenUrl: string | null;
   mapeo: ResultadoMapeo;
   meta: MetaExtraida;
+  /** E2 §6.8: espejo de solo lectura del stock del canal. null = el canal no lo informa. */
+  stockCanal: number | null;
+  manejaStockCanal: boolean;
+}
+
+/** Espejo del stock del canal (E2 §6.8). Una variación con manage_stock = 'parent' hereda del padre. */
+function espejoStock(
+  p: { manage_stock?: boolean; stock_quantity?: number | null; stock_status?: string },
+  v?: { manage_stock?: boolean | 'parent'; stock_quantity?: number | null; stock_status?: string },
+): { stockCanal: number | null; manejaStockCanal: boolean } {
+  const fuente = v && v.manage_stock !== 'parent' && v.manage_stock !== undefined ? v : p;
+  const maneja = fuente.manage_stock === true;
+  if (maneja && typeof fuente.stock_quantity === 'number') return { stockCanal: fuente.stock_quantity, manejaStockCanal: true };
+  // Sin gestión de cantidad, Woo solo dice instock/outofstock: se refleja como 0 o null.
+  const estado = v?.stock_status ?? p.stock_status;
+  return { stockCanal: estado === 'outofstock' ? 0 : null, manejaStockCanal: false };
 }
 
 async function construirItems(
@@ -147,6 +163,7 @@ async function construirItems(
           codigoBarras: meta.codigoBarras ?? codigoBarrasDesdeSku(v.sku),
           atributos,
         },
+        ...espejoStock(p, v),
       };
     });
   }
@@ -162,6 +179,7 @@ async function construirItems(
       imagenUrl: imagenPadre,
       mapeo,
       meta: { ...meta, codigoBarras: meta.codigoBarras ?? codigoBarrasDesdeSku(p.sku) },
+      ...espejoStock(p),
     },
   ];
 }
@@ -219,6 +237,9 @@ function hashDeSync(item: ItemImportable): string {
         item.meta.codigoBarras,
         item.meta.atributos?.[CLAVE_PADRE_EXTERNO] ?? null,
         item.meta.atributos?.[CLAVE_VARIANTE] ?? null,
+        // E2 §6.8 (criterio 10): un cambio SOLO de stock en Woo también refresca el espejo.
+        item.stockCanal,
+        item.manejaStockCanal,
       ]),
     )
     .digest('hex');
@@ -317,6 +338,9 @@ async function procesarItem(
             publicado: true,
             sincronizadoEn: new Date(),
             hashUltimoSync: hash,
+            stockCanal: item.stockCanal,
+            manejaStockCanal: item.manejaStockCanal,
+            stockCanalEn: new Date(),
           },
         }),
       ]);
@@ -366,6 +390,9 @@ async function procesarItem(
             publicado: true,
             sincronizadoEn: new Date(),
             hashUltimoSync: hash,
+            stockCanal: item.stockCanal,
+            manejaStockCanal: item.manejaStockCanal,
+            stockCanalEn: new Date(),
           },
         },
       },

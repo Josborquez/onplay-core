@@ -104,3 +104,23 @@ export async function api<T>(ruta: string, opciones: RequestInit = {}): Promise<
   if (!r.ok) throw new ErrorApi(r.status, String(cuerpo.error ?? 'ERROR'), cuerpo);
   return cuerpo as T;
 }
+
+/**
+ * Descarga un archivo de la API con el token en memoria (S3: nunca en la URL) y lo entrega al
+ * navegador vía blob. E2 C10: export CSV del stock.
+ */
+export async function descargar(ruta: string, nombreArchivo: string): Promise<void> {
+  const token = await asegurarToken();
+  if (!token) throw new ErrorApi(401, 'NO_AUTENTICADO', {});
+  const r = await fetch(`/api/v1${ruta}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!r.ok) throw new ErrorApi(r.status, 'DESCARGA_FALLIDA', {});
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombreArchivo;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

@@ -137,6 +137,83 @@ interface StockDetalle {
   canales: { canalId: string; publicado: boolean; stockCanal: number | null; manejaStockCanal: boolean | null; stockCanalEn: string | null }[];
 }
 
+interface MovimientoKardex {
+  id: string;
+  cantidad: number;
+  motivo: string;
+  referenciaTipo: string | null;
+  nota: string | null;
+  creadoEn: string;
+  ubicacion: { codigo: string; nombre: string };
+  usuario: { nombre: string };
+}
+
+const ETIQUETA_MOTIVO: Record<string, string> = {
+  recuento_inicial: 'Recuento inicial',
+  compra: 'Ingreso',
+  venta: 'Venta',
+  venta_online: 'Venta online',
+  ajuste: 'Ajuste',
+  merma: 'Merma',
+  devolucion: 'Devolución',
+  traslado: 'Traslado',
+};
+
+/** Kardex (C10): movimientos del producto, más nuevos primero, con saldo corriente por ubicación. */
+function Kardex({ productoId }: { productoId: string }) {
+  const [abierto, setAbierto] = useState(false);
+  const [datos, setDatos] = useState<{ movimientos: MovimientoKardex[]; total: number } | null>(null);
+  useEffect(() => {
+    if (!abierto) return;
+    let vivo = true;
+    api<{ movimientos: MovimientoKardex[]; total: number }>(`/productos/${productoId}/movimientos?limit=100`)
+      .then((r) => {
+        if (vivo) setDatos(r);
+      })
+      .catch(() => {});
+    return () => {
+      vivo = false;
+    };
+  }, [abierto, productoId]);
+  useEffect(() => {
+    setAbierto(false);
+    setDatos(null);
+  }, [productoId]);
+  return (
+    <div className="mt-3">
+      <button type="button" onClick={() => setAbierto((v) => !v)} className="text-chico text-lab2 underline underline-offset-2">
+        {abierto ? 'Ocultar movimientos' : 'Ver movimientos'}
+      </button>
+      {abierto ? (
+        !datos ? (
+          <Cargando texto="Cargando movimientos…" />
+        ) : datos.movimientos.length === 0 ? (
+          <p className="mt-1 text-chico text-lab3">Sin movimientos todavía.</p>
+        ) : (
+          <ul className="mt-2 max-h-[240px] divide-y divide-sep overflow-y-auto rounded-campo border border-sep">
+            {datos.movimientos.map((m) => (
+              <li key={m.id} className="flex items-center gap-2 px-2 py-1 text-chico">
+                <span className="w-[88px] shrink-0 text-lab3">{fecha(m.creadoEn)}</span>
+                <span className="min-w-0 flex-1 truncate text-lab">
+                  {ETIQUETA_MOTIVO[m.motivo] ?? m.motivo} · {m.ubicacion.nombre}
+                  {m.nota ? ` · ${m.nota}` : ''}
+                </span>
+                <span className="shrink-0 text-lab3">{m.usuario.nombre}</span>
+                <span className={`num w-[48px] shrink-0 text-right font-semibold ${m.cantidad < 0 ? 'text-peligro' : 'text-ok'}`}>
+                  {m.cantidad > 0 ? `+${m.cantidad}` : m.cantidad}
+                </span>
+              </li>
+            ))}
+            {datos.total > datos.movimientos.length ? (
+              <li className="px-2 py-1 text-chico text-lab3">Se muestran {datos.movimientos.length} de {datos.total}.</li>
+            ) : null}
+          </ul>
+        )
+      ) : null}
+    </div>
+  );
+}
+
 /** Desglose por ubicación y espejo del canal (E2 §6.2, §6.8), solo si controla stock. */
 function DesgloseStock({ productoId, controlaStock }: { productoId: string; controlaStock: boolean }) {
   const [d, setD] = useState<StockDetalle | null>(null);
@@ -173,6 +250,7 @@ function DesgloseStock({ productoId, controlaStock }: { productoId: string; cont
           . Solo lectura: no se suma al stock propio.
         </p>
       ) : null}
+      {controlaStock ? <Kardex productoId={productoId} /> : null}
     </>
   );
 }

@@ -188,6 +188,67 @@ export default async function rutasStock(app: FastifyInstance) {
     },
   );
 
+  // ---------- Alertas (C6, §6.2 + §6.8) ----------
+  app.get('/stock/alertas', encargado, async () => {
+    const productos = await prisma.producto.findMany({
+      where: { activo: true, controlaStock: true },
+      select: { id: true, sku: true, nombre: true, imagenUrl: true, stockMinimo: true, controlaStock: true },
+    });
+    const resumen = await resumenStock(prisma, productos.map((p) => p.id));
+    const canales = await prisma.productoCanal.findMany({
+      where: { productoId: { in: productos.map((p) => p.id) }, publicado: true, manejaStockCanal: true, stockCanal: { not: null } },
+      select: { productoId: true, canalId: true, stockCanal: true, stockCanalEn: true },
+    });
+    const filas = productos.map((p) => ({ ...p, ...resumen.get(p.id)! }));
+    const negativos = filas.filter((f) => f.estadoStock === 'negativo');
+    const quiebres = filas.filter((f) => f.estadoStock === 'quiebre');
+    const bajos = filas.filter((f) => f.estadoStock === 'bajo');
+    // «Último en la web»: el canal marca 1; «reservado»: marca 0 y hay stock propio (§6.9).
+    const web = filas.flatMap((f) =>
+      canales
+        .filter((c) => c.productoId === f.id && c.stockCanal !== null && c.stockCanal <= 1)
+        .map((c) => ({
+          ...f,
+          canalId: c.canalId,
+          stockCanal: c.stockCanal,
+          stockCanalEn: c.stockCanalEn,
+          nivel: c.stockCanal! <= 0 && (f.stockVenta ?? 0) >= 1 ? ('reservado' as const) : ('ultimo' as const),
+        })),
+    );
+    return {
+      conteos: { negativos: negativos.length, quiebres: quiebres.length, bajos: bajos.length, web: web.length },
+      negativos,
+      quiebres,
+      bajos,
+      web,
+    };
+  });
+
+  // ---------- Export CSV (C10) ----------
+  app.get<{ Querystring: { ubicacionId?: string } }>('/stock/export.csv', encargado, async (req, reply) => {
+    const ubicaciones = await prisma.ubicacion.findMany({ where: { activa: true }, orderBy: { orden: 'asc' } });
+    const elegidas = req.query.ubicacionId ? ubicaciones.filter((u) => u.id === req.query.ubicacionId) : ubicaciones;
+    const productos = await prisma.producto.findMany({
+      where: { activo: true, controlaStock: true },
+      select: { id: true, sku: true, nombre: true, stockMinimo: true },
+      orderBy: { nombre: 'asc' },
+    });
+    const filas = await prisma.stockActual.findMany({ where: { productoId: { in: productos.map((p) => p.id) } } });
+    const cant = new Map(filas.map((f) => [`${f.productoId}|${f.ubicacionId}`, f.cantidad]));
+    const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+    const lineas = ['sku,nombre,ubicacion,cantidad,stockMinimo'];
+    for (const p of productos) {
+      for (const u of elegidas) {
+        lineas.push([esc(p.sku), esc(p.nombre), esc(u.codigo), cant.get(`${p.id}|${u.id}`) ?? 0, p.stockMinimo].join(','));
+      }
+    }
+    const fecha = new Date().toISOString().slice(0, 10);
+    return reply
+      .header('Content-Type', 'text/csv; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="stock-${fecha}.csv"`)
+      .send('\ufeff' + lineas.join('\r\n'));
+  });
+
   // ---------- Movimientos manuales (C5, §6.5): ajuste, merma, compra ----------
   interface CuerpoMovimiento {
     productoId?: unknown;

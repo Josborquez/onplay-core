@@ -3,7 +3,7 @@
 // salvo el filtro «Sin control», que sirve para encender por ingreso.
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../../api.js';
+import { api, descargar } from '../../api.js';
 import { categorias } from '../../catalogo.js';
 import { Banner, Boton, Cargando, Insignia, Segmentado, Vacio } from '../../components/base.js';
 import { DialogoMovimientoStock, type MotivoManual } from '../../components/DialogoMovimientoStock.js';
@@ -69,10 +69,14 @@ export function Stock() {
   const [error, setError] = useState(false);
   const [aviso, setAviso] = useState('');
   const [dialogo, setDialogo] = useState<{ producto: FilaStock; motivo: MotivoManual } | null>(null);
+  const [conteoAlertas, setConteoAlertas] = useState<number | null>(null);
 
   useEffect(() => {
     void categorias().then((arbol) => setOpcionesCategoria(aplanarCategorias(arbol)));
     void api<{ ubicaciones: Ubicacion[] }>('/ubicaciones').then((r) => setUbicaciones(r.ubicaciones)).catch(() => {});
+    void api<{ conteos: { negativos: number; quiebres: number; bajos: number; web: number } }>('/stock/alertas')
+      .then((r) => setConteoAlertas(r.conteos.negativos + r.conteos.quiebres + r.conteos.bajos + r.conteos.web))
+      .catch(() => {});
   }, []);
 
   useEffect(() => setPagina(1), [q, ubicacionId, estado, categoriaId]);
@@ -107,9 +111,25 @@ export function Stock() {
       <Encabezado
         titulo="Stock"
         extra={
-          <Link to="/admin/recuentos" className="text-chico text-lab2 underline underline-offset-2">
-            Ir a recuentos →
-          </Link>
+          <span className="flex items-center gap-3">
+            <Link to="/admin/stock/alertas" className="text-chico text-lab2 underline underline-offset-2">
+              Alertas{conteoAlertas !== null ? ` (${conteoAlertas})` : ''}
+            </Link>
+            <button
+              type="button"
+              onClick={() =>
+                void descargar(`/stock/export.csv${ubicacionId ? `?ubicacionId=${ubicacionId}` : ''}`, `stock-${new Date().toISOString().slice(0, 10)}.csv`).catch(() =>
+                  setError(true),
+                )
+              }
+              className="text-chico text-lab2 underline underline-offset-2"
+            >
+              Exportar CSV
+            </button>
+            <Link to="/admin/recuentos" className="text-chico text-lab2 underline underline-offset-2">
+              Recuentos →
+            </Link>
+          </span>
         }
       />
 
