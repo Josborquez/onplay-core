@@ -25,9 +25,10 @@ export interface ProductoCache {
 /**
  * Versión de los campos que trae `catalogo-offline`. Si cambia, el delta `?desde` no basta
  * (las filas viejas no tendrían el campo nuevo): se baja el catálogo completo una vez.
- * 1 = §5.2 original · 2 = + imagenUrl (R-006) · 3 = + stock (E2 §7.3).
+ * 1 = §5.2 original · 2 = + imagenUrl (R-006) · 3 = + stock (E2 §7.3) · 4 = stock con marcas UTC (R-014:
+ * las filas cacheadas con el esquema 3 pueden tener stock viejo que el delta nunca refresca).
  */
-const ESQUEMA_CATALOGO = 3;
+const ESQUEMA_CATALOGO = 4;
 
 export interface Categoria {
   id: string;

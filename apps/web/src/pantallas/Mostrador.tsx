@@ -80,8 +80,18 @@ export function Mostrador() {
     return () => clearTimeout(id);
   }, [avisoStock]);
 
-  const agregarProducto = useCallback((p: ProductoCache) => {
-    const disponible = p.controlaStock && p.stockVenta != null ? p.stockVenta : null;
+  const agregarProducto = useCallback(async (p: ProductoCache) => {
+    let disponible = p.controlaStock && p.stockVenta != null ? p.stockVenta : null;
+    // Con conexión, el tope se toma del servidor en el momento (una consulta chica): el caché
+    // puede tener stock viejo. Sin conexión vale el caché y el servidor revalida al cobrar.
+    if (p.controlaStock && enLinea) {
+      try {
+        const vivo = await api<{ controlaStock: boolean; stockVenta: number | null }>(`/productos/${p.id}/stock`);
+        disponible = vivo.controlaStock && vivo.stockVenta != null ? vivo.stockVenta : null;
+      } catch {
+        /* sin respuesta: se usa el caché */
+      }
+    }
     setCarrito((prev) => {
       const existente = prev.find((l) => l.productoId === p.id);
       const enCarrito = existente?.cantidad ?? 0;
@@ -105,7 +115,7 @@ export function Mostrador() {
         },
       ];
     });
-  }, []);
+  }, [enLinea]);
 
   const abrirCobro = useCallback(() => {
     setClaveVenta((k) => k ?? ulid()); // estable ante reintentos: criterio 9 de 02-SDD
