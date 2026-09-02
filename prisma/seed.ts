@@ -33,6 +33,13 @@ const CATEGORIAS: Array<[string, string, string | null]> = [
   ['Sin clasificar', 'sin-clasificar', null], // destino por defecto sin coincidencia
 ];
 
+const UBICACIONES = [
+  { codigo: 'mostrador', nombre: 'Mostrador', esVenta: true, publicable: false, orden: 1 },
+  { codigo: 'carpetas', nombre: 'Carpetas', esVenta: false, publicable: false, orden: 2 },
+  { codigo: 'vitrina', nombre: 'Vitrina', esVenta: false, publicable: false, orden: 3 },
+  { codigo: 'bodega', nombre: 'Bodega', esVenta: false, publicable: true, orden: 4 },
+];
+
 async function main() {
   for (const c of CANALES) {
     await prisma.canal.upsert({
@@ -67,6 +74,16 @@ async function main() {
     },
   });
 
+  // E2 §5.3 — ubicaciones semilla (01 §9). `mostrador` es la única de venta;
+  // `bodega` es la publicable para E3 (06 §4). NO se enciende controlaStock aquí (M5).
+  for (const u of UBICACIONES) {
+    await prisma.ubicacion.upsert({
+      where: { codigo: u.codigo },
+      update: { nombre: u.nombre, orden: u.orden },
+      create: u,
+    });
+  }
+
   const anioActual = new Date().getUTCFullYear();
   await prisma.correlativo.upsert({
     where: { clave: 'venta' },
@@ -75,7 +92,7 @@ async function main() {
   });
 
   console.log(
-    `Semillas listas: ${CANALES.length} canales, ${CATEGORIAS.length} categorías, SRV-000001, correlativo venta/${anioActual}.`,
+    `Semillas listas: ${CANALES.length} canales, ${CATEGORIAS.length} categorías, SRV-000001, ${UBICACIONES.length} ubicaciones, correlativo venta/${anioActual}.`,
   );
 }
 

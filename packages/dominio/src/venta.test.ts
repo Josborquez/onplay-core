@@ -102,4 +102,15 @@ describe('calcularArqueo (§5.3)', () => {
   it('sin ventas en efectivo, esperado = apertura', () => {
     expect(calcularArqueo(20000, 0, 20000)).toEqual({ montoEsperado: 20000, diferencia: 0 });
   });
+
+  // E2 §6.7: devoluciones en efectivo restan; ingresos suman; retiros restan (criterios 12 y 13).
+  it('E2: devoluciones en efectivo y movimientos de caja', () => {
+    expect(calcularArqueo(20000, 3200, 23200, { devolucionesEfectivo: 0, ingresosCaja: 0, retirosCaja: 0 })).toEqual({
+      montoEsperado: 23200,
+      diferencia: 0,
+    });
+    expect(calcularArqueo(20000, 3200, 21200, { devolucionesEfectivo: 2000 }).montoEsperado).toBe(21200);
+    expect(calcularArqueo(20000, 3200, 0, { ingresosCaja: 5000, retirosCaja: 20000 }).montoEsperado).toBe(8200);
+    expect(calcularArqueo(20000, 3200, 8000, { ingresosCaja: 5000, retirosCaja: 20000 }).diferencia).toBe(-200);
+  });
 });

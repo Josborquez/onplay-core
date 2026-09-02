@@ -139,16 +139,31 @@ export interface Arqueo {
   diferencia: number;
 }
 
+/** Términos de E2 (03-SDD §6.7). Todos en positivo; el signo lo pone la fórmula. */
+export interface ExtrasArqueo {
+  devolucionesEfectivo?: number;
+  ingresosCaja?: number;
+  retirosCaja?: number;
+}
+
 /**
- * Arqueo de cierre de turno (§5.3):
- * montoEsperado = montoApertura + efectivo de ventas completadas del turno.
+ * Arqueo de cierre de turno (02 §5.3, extendido por 03 §6.7):
+ * montoEsperado = montoApertura + efectivo de ventas completadas
+ *               − devoluciones en efectivo + ingresos de caja − retiros de caja.
  * diferencia = montoDeclarado − montoEsperado.
+ * Con los extras en cero (o ausentes) es exactamente la fórmula de E1.
  */
 export function calcularArqueo(
   montoApertura: number,
   efectivoVentasCompletadas: number,
   montoDeclarado: number,
+  extras: ExtrasArqueo = {},
 ): Arqueo {
-  const montoEsperado = montoApertura + efectivoVentasCompletadas;
+  const montoEsperado =
+    montoApertura +
+    efectivoVentasCompletadas -
+    (extras.devolucionesEfectivo ?? 0) +
+    (extras.ingresosCaja ?? 0) -
+    (extras.retirosCaja ?? 0);
   return { montoEsperado, diferencia: montoDeclarado - montoEsperado };
 }

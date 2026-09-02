@@ -68,6 +68,36 @@ enum AccionAuditoria {
   cambiar_precio
   abrir_turno
   cerrar_turno
+  // E2 §5.2 — al FINAL del enum (añadir al final es instantáneo en MySQL)
+  devolver
+  recuento
+  ajustar_stock
+  vender_reservado // vendió pese al bloqueo de §6.9 (pedido web pagado), con nota
+}
+
+// ─── Etapa 2: inventario (docs/03-SDD §5.1) ───────────────────────────────────
+
+// Motivos del libro de stock — 01-SDD §6.2. `venta_online` lo genera E3c, no E2.
+enum MotivoStock {
+  recuento_inicial // primer recuento del producto en esa ubicación: punto de partida
+  compra // ingreso de mercadería (sin OC en E2; E6 le pone referencia)
+  venta // descuento por venta del mostrador (referencia venta)
+  venta_online // reservado: lo genera E3c (referencia pedido_canal)
+  ajuste // recuento posterior con diferencia, o corrección manual con nota
+  merma // pérdida, daño, robo
+  devolucion // reposición por devolución o anulación (referencia devolucion | venta)
+  traslado // salida de A y entrada a B (dos filas, misma referencia)
+}
+
+enum EstadoRecuento {
+  abierto
+  cerrado
+  descartado
+}
+
+enum TipoMovimientoCaja {
+  ingreso
+  retiro
 }
 
 model Canal {
@@ -101,7 +131,8 @@ model Producto {
   categoriaId      String?
   categoria        Categoria?   @relation(fields: [categoriaId], references: [id])
   precioVenta      Int          @default(0) // CLP, sin decimales
-  controlaStock    Boolean      @default(false) // Principio P4
+  controlaStock    Boolean      @default(false) // Principio P4; E2 lo enciende por recuento (M5)
+  stockMinimo      Int          @default(0) // E2 §5.2: umbral de «stock bajo»; 0 = sin alerta de bajo
   activo           Boolean      @default(true)
   posibleDuplicado Boolean      @default(false) // marcado por el importador, §6.6
   imagenUrl        String?      @db.Text
@@ -111,8 +142,11 @@ model Producto {
   creadoEn         DateTime     @default(now())
   actualizadoEn    DateTime     @updatedAt
 
-  canales ProductoCanal[]
-  lineas  VentaLinea[]
+  canales          ProductoCanal[]
+  lineas           VentaLinea[]
+  movimientosStock MovimientoStock[] // E2
+  stock            StockActual[] // E2
+  recuentoLineas   RecuentoLinea[] // E2
 
   @@index([tipo, activo])
   @@index([codigoBarras])
@@ -132,6 +166,12 @@ model ProductoCanal {
   precioCanal    Int? // null => hereda producto.precioVenta
   sincronizadoEn DateTime?
   hashUltimoSync String?
+
+  // E2 §6.8 — espejo de SOLO LECTURA del stock que el canal publica (P2). Nunca se
+  // suma al stock propio (M6). Distinto de `stockPublicado` de E3 (lo que el maestro escribió).
+  stockCanal       Int?
+  manejaStockCanal Boolean?
+  stockCanalEn     DateTime?
 
   @@unique([canalId, externoId])
   @@unique([canalId, externoSku])
@@ -153,6 +193,10 @@ model Usuario {
   ventasAnuladas      Venta[]              @relation("VentasAnuladas")
   auditorias          Auditoria[]
   movimientosMonedero MovimientoMonedero[] // E4 §5.3
+  movimientosStock    MovimientoStock[] // E2
+  recuentos           Recuento[] // E2
+  devoluciones        Devolucion[] // E2
+  movimientosCaja     MovimientoCaja[] // E2
 }
 
 model TurnoCaja {
@@ -168,7 +212,9 @@ model TurnoCaja {
   diferencia     Int? // declarado - esperado
   notas          String?     @db.Text
 
-  ventas Venta[]
+  ventas          Venta[]
+  devoluciones    Devolucion[] // E2 §6.6: el dinero sale del turno ABIERTO que devuelve
+  movimientosCaja MovimientoCaja[] // E2 §6.7
 
   @@index([usuarioId, estado])
 }
@@ -196,8 +242,9 @@ model Venta {
   anuladaPor      Usuario?    @relation("VentasAnuladas", fields: [anuladaPorId], references: [id])
   creadoEn        DateTime    @default(now())
 
-  lineas VentaLinea[]
-  pagos  Pago[]
+  lineas       VentaLinea[]
+  pagos        Pago[]
+  devoluciones Devolucion[] // E2
 
   @@index([creadoEn])
   @@index([turnoCajaId])
@@ -215,6 +262,8 @@ model VentaLinea {
   precioUnitario Int
   descuentoLinea Int       @default(0)
   totalLinea     Int
+
+  devolucionLineas DevolucionLinea[] // E2
 
   @@index([ventaId])
   @@index([productoId])
@@ -338,4 +387,136 @@ model MovimientoMonedero {
 
   @@index([clienteId, creadoEn])
   @@index([referenciaTipo, referenciaId])
+}
+
+// ─── Etapa 2: inventario (docs/03-SDD §5.1) ───────────────────────────────────
+
+model Ubicacion {
+  id         String  @id @default(cuid())
+  codigo     String  @unique // mostrador · carpetas · vitrina · bodega (semilla); libre después
+  nombre     String
+  publicable Boolean @default(false) // §13: E3 suma solo estas. Semilla: bodega = true
+  esVenta    Boolean @default(false) // de aquí descuenta el mostrador. Semilla: mostrador, única
+  activa     Boolean @default(true)
+  orden      Int     @default(0)
+
+  movimientos MovimientoStock[]
+  stock       StockActual[]
+  recuentos   Recuento[]
+}
+
+// Libro append-only (P5). El stock es SUM(cantidad). Nunca se actualiza ni se borra una fila.
+model MovimientoStock {
+  id             String      @id @default(cuid())
+  productoId     String
+  producto       Producto    @relation(fields: [productoId], references: [id])
+  ubicacionId    String
+  ubicacion      Ubicacion   @relation(fields: [ubicacionId], references: [id])
+  cantidad       Int // CON SIGNO: positivo entra, negativo sale. Nunca 0
+  motivo         MotivoStock
+  referenciaTipo String? // 'venta' | 'devolucion' | 'recuento' | 'traslado' | 'ajuste' | 'pedido_canal' (E3)
+  referenciaId   String?
+  nota           String?     @db.Text
+  usuarioId      String
+  usuario        Usuario     @relation(fields: [usuarioId], references: [id])
+  creadoEn       DateTime    @default(now())
+
+  @@index([productoId, ubicacionId, creadoEn])
+  @@index([referenciaTipo, referenciaId])
+  @@index([motivo, creadoEn])
+}
+
+// Resumen materializado (01 §6.2). Se actualiza SOLO desde registrarMovimiento, en la misma
+// transacción, con SELECT … FOR UPDATE sobre esta fila (M1). Nunca se escribe desde otro sitio.
+model StockActual {
+  productoId    String
+  producto      Producto  @relation(fields: [productoId], references: [id])
+  ubicacionId   String
+  ubicacion     Ubicacion @relation(fields: [ubicacionId], references: [id])
+  cantidad      Int       @default(0)
+  actualizadoEn DateTime  @updatedAt
+
+  @@id([productoId, ubicacionId])
+  @@index([ubicacionId, cantidad])
+}
+
+// Recuento guiado (C4): una ubicación y, opcionalmente, una categoría (subárbol) o productos a mano.
+model Recuento {
+  id          String         @id @default(cuid())
+  ubicacionId String
+  ubicacion   Ubicacion      @relation(fields: [ubicacionId], references: [id])
+  categoriaId String? // filtro del alcance; null = productos elegidos a mano
+  nombre      String // "Snacks mostrador 02-09", libre
+  estado      EstadoRecuento @default(abierto)
+  usuarioId   String
+  usuario     Usuario        @relation(fields: [usuarioId], references: [id])
+  creadoEn    DateTime       @default(now())
+  cerradoEn   DateTime?
+  nota        String?        @db.Text
+
+  lineas RecuentoLinea[]
+
+  @@index([ubicacionId, estado])
+}
+
+model RecuentoLinea {
+  id              String    @id @default(cuid())
+  recuentoId      String
+  recuento        Recuento  @relation(fields: [recuentoId], references: [id], onDelete: Cascade)
+  productoId      String
+  producto        Producto  @relation(fields: [productoId], references: [id])
+  cantidadSistema Int // snapshot de stock_actual al agregar la línea
+  cantidadContada Int? // null = todavía no contado
+  contadoEn       DateTime?
+
+  @@unique([recuentoId, productoId])
+}
+
+// Devolución (C8): dinero sale de la caja ABIERTA de quien la hace, stock vuelve por línea.
+model Devolucion {
+  id          String    @id @default(cuid())
+  folio       String    @unique // D-2026-00001, Correlativo clave 'devolucion_{año}'
+  ventaId     String
+  venta       Venta     @relation(fields: [ventaId], references: [id])
+  turnoCajaId String // turno ABIERTO en que se devuelve (puede ser otro que el de la venta)
+  turnoCaja   TurnoCaja @relation(fields: [turnoCajaId], references: [id])
+  monto       Int // CLP devuelto, <= lo pagado y no devuelto de esa venta
+  medio       MedioPago // efectivo (resta en el arqueo) · monedero (E4) · otro (fuera del sistema)
+  motivo      String    @db.Text
+  usuarioId   String
+  usuario     Usuario   @relation(fields: [usuarioId], references: [id])
+  creadoEn    DateTime  @default(now())
+
+  lineas DevolucionLinea[]
+
+  @@index([ventaId])
+  @@index([turnoCajaId])
+}
+
+model DevolucionLinea {
+  id           String     @id @default(cuid())
+  devolucionId String
+  devolucion   Devolucion @relation(fields: [devolucionId], references: [id], onDelete: Cascade)
+  ventaLineaId String
+  ventaLinea   VentaLinea @relation(fields: [ventaLineaId], references: [id])
+  cantidad     Int // <= cantidad vendida − ya devuelta
+  reponeStock  Boolean    @default(true) // false = producto dañado: no vuelve al stock
+  montoLinea   Int
+
+  @@index([ventaLineaId])
+}
+
+// Movimiento de caja (C9): efectivo que entra o sale del turno sin ser venta (02 §5.5 → E2).
+model MovimientoCaja {
+  id          String             @id @default(cuid())
+  turnoCajaId String
+  turnoCaja   TurnoCaja          @relation(fields: [turnoCajaId], references: [id])
+  tipo        TipoMovimientoCaja
+  monto       Int // siempre positivo; el tipo da el signo
+  nota        String             @db.Text // obligatoria
+  usuarioId   String
+  usuario     Usuario            @relation(fields: [usuarioId], references: [id])
+  creadoEn    DateTime           @default(now())
+
+  @@index([turnoCajaId])
 }

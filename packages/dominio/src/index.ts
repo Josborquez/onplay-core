@@ -15,6 +15,7 @@ export {
   type CalculoVenta,
   type ErrorVenta,
   type Arqueo,
+  type ExtrasArqueo,
 } from './venta.js';
 export { normalizarRut, calcularDvRut } from './rut.js';
 export {
@@ -32,3 +33,32 @@ export {
   type ClienteComparable,
   type DuplicadoCliente,
 } from './cliente.js';
+// E2 — docs/03-SDD-etapa2-inventario.md §6
+export {
+  validarMovimientoStock,
+  firmarCantidadManual,
+  aplicarMovimiento,
+  estadoStock,
+  avisoWeb,
+  cerrarRecuento,
+  MOTIVOS_MANUALES,
+  MOTIVOS_CON_NOTA,
+  type MotivoStock,
+  type MovimientoStockEntrada,
+  type ErrorMovimientoStock,
+  type EstadoStock,
+  type NivelAvisoWeb,
+  type LineaRecuentoCierre,
+  type MovimientoDeCierre,
+} from './stock.js';
+export {
+  validarDevolucion,
+  prorratearDescuento,
+  formatearFolioDevolucion,
+  type LineaVendida,
+  type LineaADevolver,
+  type VentaParaDevolver,
+  type ErrorDevolucion,
+  type LineaDevolucionCalculada,
+  type CalculoDevolucion,
+} from './devolucion.js';
