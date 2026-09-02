@@ -120,7 +120,9 @@ export function DialogoMovimientoStock({ abierto, producto, motivoInicial, ubica
       if (e instanceof ErrorApi) {
         const codigo = e.codigo;
         setError(
-          codigo === 'SIN_CONTROL_STOCK'
+          codigo === 'STOCK_INSUFICIENTE'
+            ? `No hay stock suficiente: quedan ${String((e.cuerpo as { disponible?: number }).disponible ?? 0)}.`
+            : codigo === 'SIN_CONTROL_STOCK'
             ? 'Este producto todavía no controla stock: primero un recuento o un ingreso.'
             : codigo === 'NOTA_REQUERIDA'
               ? 'La nota es obligatoria.'
@@ -204,7 +206,7 @@ export function DialogoMovimientoStock({ abierto, producto, motivoInicial, ubica
                   <span className={`num font-semibold ${origenNuevo < 0 ? 'text-peligro' : 'text-lab'}`}>{origenNuevo}</span>.
                 </>
               )}
-              {origenNuevo < 0 ? ' Quedará en negativo: se registra igual y aparece en alertas.' : ''}
+              {origenNuevo < 0 ? ' No se puede: el stock no queda en negativo (R-014).' : ''}
             </p>
           ) : null}
 

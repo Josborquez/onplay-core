@@ -29,6 +29,7 @@
 | R-011 | 2026-09-02 | Riesgo de negocio | Sobreventa entre web y mostrador con poco stock (ha ocurrido en la vida real) | Agendado (E2/E3) — regla de prioridad decidida y escrita en 03 §6.9 y 06 §8.4 |
 | R-012 | 2026-09-02 | Backoffice (V5) | Tipo = Sellado + Categoría = Magic no muestra nada | Corregido (filtro Juego + categoría por subárbol) |
 | R-013 | 2026-09-02 | Etapa 2 | Cierre de E2: código completo, queda el recuento real (criterio 18) | Abierto (del dueño) |
+| R-014 | 2026-09-02 | Mostrador / Stock | El stock no puede quedar en −1 ni la venta aceptar más de lo disponible; icono de Clientes | Corregido (cambia D-E2-1 y M2 de 03-SDD) |
 
 ---
 
@@ -159,6 +160,16 @@
 - **Qué falta (criterio 18):** dos recuentos consecutivos de snacks y sellado que cuadren, hechos en la tienda. Es lo que declara «lista» la etapa según `01-SDD` §9. Se hace desde `/admin/recuentos` siguiendo la guía.
 - **Datos de prueba en dev que conviene limpiar antes de un recuento real:** SNK-000001 Coca-Cola, SNK-000002 Sprite y ACC-000079 Katana Red tienen movimientos de prueba (incluidos 1.000 ajustes «crit1 concurrencia»), ventas V-2026-00015..00023, devoluciones D-2026-00001/00002 y recuentos de prueba. En producción la base nace limpia; en dev, un recuento real los deja en el número correcto sin borrar nada (P9).
 - **Recordatorio de despliegue:** E2 se construyó en local (D-E2-6). Ponerla en producción exige que E1 lleve 7 días corridos (`02` criterio 11) y `npx prisma migrate deploy` con la migración `20260902195601_e2_inventario`.
+
+### R-014 · El stock no puede quedar en −1 ni la venta aceptar más de lo disponible
+
+- **Fecha:** 2026-09-02. **Estado:** Corregido. **Decisión del dueño que cambia D-E2-1 y M2 de `03-SDD`** (la versión original permitía negativos con advertencia).
+- **Regla nueva:** con control de stock, el mostrador no agrega más unidades que las disponibles en la ubicación de venta (tope con el stock del caché; aviso «solo quedan N»; «+» del carrito apagado en el tope) y el servidor rechaza la venta entera con `422 STOCK_INSUFICIENTE {productoId, descripcion, disponible, solicitado}` si el stock cambió entre medio. La regla vive en `registrarMovimiento` (`apps/api/src/stock/libro.ts`), así que también protege mermas, ajustes y traslados. Un producto en «sin stock» se corrige con Ingresar o Recontar antes de venderlo.
+- **Efectos:** criterio 5 de la spec reescrito (dos ventas simultáneas de la última unidad → una 201 y una 422, stock 0). Las advertencias `STOCK_NEGATIVO` ya no se emiten. La sección «Negativos» de Alertas queda para datos anteriores a esta regla (en dev, el Sprite en −1 hasta que se reconte).
+- **Icono:** «Clientes» en la barra lateral pasa de `◉` a un icono de dos personas (SVG en línea, hereda el color).
+- **Dos defectos que salieron al verificar en Chrome y quedaron corregidos:** (a) el delta del caché offline (`catalogo-offline?desde=`) solo traía productos cuya fila `Producto` cambió, así que un movimiento de stock no refrescaba el tope del carrito hasta 30 min; ahora el delta incluye productos con `StockActual.actualizadoEn` o `ProductoCanal.stockCanalEn` posteriores a la marca, y el mostrador refresca el caché al terminar cada venta. (b) el libro escribía `actualizadoEn` con `NOW(3)` (hora local de MariaDB) mientras Prisma guarda UTC: los cambios quedaban fechados horas atrás y el delta no los veía; ahora usa `UTC_TIMESTAMP(3)`.
+- **Verificado:** merma de 5 con 1 disponible → 422; venta de 2 con 1 → 422 con `descripcion`; dos ventas simultáneas de la última unidad → una 201 y una 422, stock 0, `verificar` sin diferencias; delta trae la Coca tras un ingreso.
+- **Archivos:** `stock/libro.ts`, `rutas/ventas.ts`, `rutas/productos.ts` (delta), `Mostrador.tsx`, `PanelVenta.tsx`, `DialogoCobro.tsx`, `DialogoMovimientoStock.tsx`, `BarraLateral.tsx`, `tipos.ts`, docs 03 y 09.
 
 ---
 

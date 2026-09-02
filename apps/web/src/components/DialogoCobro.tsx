@@ -201,6 +201,12 @@ export function DialogoCobro({
         setEnviando(false);
         return;
       }
+      if (e.codigo === 'STOCK_INSUFICIENTE') {
+        const c = e.cuerpo as { descripcion?: string | null; disponible?: number; solicitado?: number };
+        setError(`Sin stock suficiente de «${c.descripcion ?? 'un producto'}»: quedan ${c.disponible ?? 0} y la venta pide ${c.solicitado ?? '?'}. Ajusta la cantidad.`);
+        setEnviando(false);
+        return;
+      }
       const detalle = typeof e.cuerpo.detalle === 'string' ? ` ${e.cuerpo.detalle}` : '';
       setError(`No se pudo registrar la venta.${detalle} Intenta de nuevo.`);
       setEnviando(false);

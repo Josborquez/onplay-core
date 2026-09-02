@@ -106,6 +106,8 @@ export interface LineaCarrito {
   cantidad: number;
   precioUnitario: number;
   precioCatalogo: number | null;
+  /** R-014: tope de unidades vendibles (stock en la ubicación de venta); null = sin control. */
+  stockDisponible: number | null;
 }
 
 export const ETIQUETA_MEDIO: Record<MedioPago, string> = {

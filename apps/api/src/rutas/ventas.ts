@@ -369,7 +369,11 @@ export default async function rutasVentas(app: FastifyInstance) {
     } catch (e) {
       // Saldo insuficiente o tope de crédito: la transacción entera se abortó (§6.2 paso 5).
       if (e instanceof ErrorMonedero) return reply.code(422).send(e.cuerpo);
-      if (e instanceof ErrorStock) return reply.code(e.status).send(e.cuerpo);
+      // R-014: sin stock suficiente la venta entera se aborta; se devuelve el producto afectado.
+      if (e instanceof ErrorStock) {
+        const productoId = typeof e.cuerpo.productoId === 'string' ? e.cuerpo.productoId : null;
+        return reply.code(e.status).send({ ...e.cuerpo, descripcion: productoId ? porProducto.get(productoId)?.descripcion ?? null : null });
+      }
       // Carrera sobre idempotencyKey: dos reintentos simultáneos. Devolver la original.
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
         const original = await prisma.venta.findUnique({

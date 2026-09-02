@@ -46,11 +46,13 @@ export interface ResultadoMovimiento {
  * Correlativo) antes de crear la venta; volver a bloquear la misma fila en la misma tx es gratis.
  */
 export async function bloquearStock(tx: Tx, productoId: string, ubicacionId: string): Promise<number> {
+  // UTC_TIMESTAMP(3), no NOW(3): Prisma guarda DateTime en UTC y el delta del catalogo offline
+  // compara contra esa marca; NOW() en MariaDB es hora local de Chile (R-014).
   // ON DUPLICATE KEY UPDATE cantidad = cantidad: no pisa nada si la fila ya existe y evita
   // la carrera de dos transacciones creando la misma fila.
   await tx.$executeRaw`
     INSERT INTO StockActual (productoId, ubicacionId, cantidad, actualizadoEn)
-    VALUES (${productoId}, ${ubicacionId}, 0, NOW(3))
+    VALUES (${productoId}, ${ubicacionId}, 0, UTC_TIMESTAMP(3))
     ON DUPLICATE KEY UPDATE cantidad = cantidad`;
   const filas = await tx.$queryRaw<{ cantidad: number }[]>`
     SELECT cantidad FROM StockActual
@@ -64,6 +66,19 @@ export async function registrarMovimiento(tx: Tx, e: EntradaMovimiento): Promise
   if (error) throw new ErrorStock({ error: error.codigo, detalle: error.detalle });
 
   const actual = await bloquearStock(tx, e.productoId, e.ubicacionId);
+  // R-014 (decisión del dueño 2026-09-02): el stock NUNCA queda negativo. Una salida mayor que
+  // lo disponible aborta la transacción entera (venta, merma, ajuste o traslado).
+  const r = aplicarMovimiento(actual, e.cantidad);
+  if (r.quedaNegativo) {
+    throw new ErrorStock({
+      error: 'STOCK_INSUFICIENTE',
+      detalle: `Disponible ${actual}, se intenta sacar ${-e.cantidad}`,
+      productoId: e.productoId,
+      ubicacionId: e.ubicacionId,
+      disponible: actual,
+      solicitado: -e.cantidad,
+    });
+  }
   const mov = await tx.movimientoStock.create({
     data: {
       productoId: e.productoId,
@@ -77,9 +92,8 @@ export async function registrarMovimiento(tx: Tx, e: EntradaMovimiento): Promise
     },
   });
   await tx.$executeRaw`
-    UPDATE StockActual SET cantidad = cantidad + ${e.cantidad}, actualizadoEn = NOW(3)
+    UPDATE StockActual SET cantidad = cantidad + ${e.cantidad}, actualizadoEn = UTC_TIMESTAMP(3)
     WHERE productoId = ${e.productoId} AND ubicacionId = ${e.ubicacionId}`;
-  const r = aplicarMovimiento(actual, e.cantidad);
   return { movimientoId: mov.id, ...r };
 }
 

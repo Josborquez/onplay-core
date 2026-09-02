@@ -1,12 +1,23 @@
 // Barra lateral plegable (05-SDD §3.1/§3.2) con conmutador de tema e indicador de conexión.
 // Los ítems del backoffice solo aparecen para encargado+ (§6): un vendedor nunca entra a /admin.
+import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useCola } from '../cola.js';
 import { useSesion } from '../sesion.js';
 import { useEnLinea } from '../tema.js';
 import { rolAlcanza, type RolUsuario } from '../tipos.js';
 
-const ITEMS: { a: string; etiqueta: string; icono: string; rol: RolUsuario }[] = [
+/** Icono de personas para Clientes (R-014): dos siluetas, trazo fino, hereda el color del texto. */
+const ICONO_PERSONAS = (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="inline-block align-[-2px]">
+    <circle cx="9" cy="8" r="3.2" />
+    <path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5" />
+    <circle cx="16.5" cy="9" r="2.6" />
+    <path d="M15.5 14.2c2.8.2 5 2.1 5 4.8" />
+  </svg>
+);
+
+const ITEMS: { a: string; etiqueta: string; icono: ReactNode; rol: RolUsuario }[] = [
   { a: '/', etiqueta: 'Mostrador', icono: '◧', rol: 'vendedor' },
   { a: '/mis-ventas', etiqueta: 'Mis ventas', icono: '◍', rol: 'vendedor' },
   { a: '/admin/productos', etiqueta: 'Productos', icono: '▤', rol: 'encargado' },
@@ -15,7 +26,7 @@ const ITEMS: { a: string; etiqueta: string; icono: string; rol: RolUsuario }[] =
   { a: '/admin/recuentos', etiqueta: 'Recuentos', icono: '☑', rol: 'encargado' }, // E2 V20
   { a: '/admin/ventas', etiqueta: 'Ventas', icono: '◈', rol: 'encargado' },
   { a: '/admin/turnos', etiqueta: 'Turnos', icono: '▦', rol: 'encargado' },
-  { a: '/admin/clientes', etiqueta: 'Clientes', icono: '◉', rol: 'encargado' },
+  { a: '/admin/clientes', etiqueta: 'Clientes', icono: ICONO_PERSONAS, rol: 'encargado' },
   { a: '/admin/duplicados', etiqueta: 'Duplicados', icono: '⧉', rol: 'encargado' },
   { a: '/admin/auditoria', etiqueta: 'Auditoría', icono: '≣', rol: 'encargado' },
   { a: '/admin/sync', etiqueta: 'Sincronización', icono: '⇄', rol: 'admin' },

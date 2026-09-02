@@ -72,7 +72,9 @@ export const LineaVenta = memo(function LineaVenta({
             type="button"
             onClick={() => onCantidad(linea.clave, linea.cantidad + 1)}
             aria-label="Sumar uno"
-            className="flex h-[36px] w-[36px] items-center justify-center rounded border border-sep bg-bg text-lab2"
+            disabled={linea.stockDisponible !== null && linea.cantidad >= linea.stockDisponible}
+            title={linea.stockDisponible !== null && linea.cantidad >= linea.stockDisponible ? `Sin más stock: quedan ${linea.stockDisponible}` : undefined}
+            className="flex h-[36px] w-[36px] items-center justify-center rounded border border-sep bg-bg text-lab2 disabled:cursor-not-allowed disabled:opacity-40"
           >
             +
           </button>

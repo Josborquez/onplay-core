@@ -180,8 +180,18 @@ export default async function rutasProductos(app: FastifyInstance) {
         }
       }
       const generadoEn = new Date().toISOString();
+      // E2 R-014: el delta tambien trae productos cuyo STOCK (propio o espejo del canal) cambio
+      // desde la marca, aunque la fila Producto no se haya tocado: el tope del carrito depende de eso.
       const productos = await prisma.producto.findMany({
-        where: desde ? { actualizadoEn: { gt: desde } } : {},
+        where: desde
+          ? {
+              OR: [
+                { actualizadoEn: { gt: desde } },
+                { stock: { some: { actualizadoEn: { gt: desde } } } },
+                { canales: { some: { stockCanalEn: { gt: desde } } } },
+              ],
+            }
+          : {},
         // Campos de §5.2 (payload deliberadamente mínimo) + imagenUrl (R-006: miniaturas
         // en la lista de accesos rápidos; es solo la URL, la imagen se carga bajo demanda).
         select: {

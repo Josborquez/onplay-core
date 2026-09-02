@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ulid } from 'ulid';
 import { api } from '../api.js';
-import { productoPorId, hidratarCatalogo, iniciarRefrescoPeriodico, type ProductoCache } from '../catalogo.js';
+import { productoPorId, hidratarCatalogo, iniciarRefrescoPeriodico, refrescarCatalogo, type ProductoCache } from '../catalogo.js';
 import { encolarVenta, useCola, type CuerpoVenta } from '../cola.js';
 import { useEnLinea } from '../tema.js';
 import type { ClienteResumen, LineaCarrito, PagoNuevo, RespuestaVenta, Turno, ReservadoWeb } from '../tipos.js';
@@ -71,11 +71,26 @@ export function Mostrador() {
   const total = Math.max(0, totalLineas - (descuento || 0));
   const cobrable = motivoNoCobrable(carrito, descuento) === null;
 
+  // R-014: el stock nunca queda negativo. Con control, no se agregan más unidades que las
+  // disponibles en la ubicación de venta (dato del caché; el servidor lo revalida al cobrar).
+  const [avisoStock, setAvisoStock] = useState('');
+  useEffect(() => {
+    if (!avisoStock) return;
+    const id = setTimeout(() => setAvisoStock(''), 3500);
+    return () => clearTimeout(id);
+  }, [avisoStock]);
+
   const agregarProducto = useCallback((p: ProductoCache) => {
+    const disponible = p.controlaStock && p.stockVenta != null ? p.stockVenta : null;
     setCarrito((prev) => {
       const existente = prev.find((l) => l.productoId === p.id);
+      const enCarrito = existente?.cantidad ?? 0;
+      if (disponible !== null && enCarrito + 1 > disponible) {
+        setAvisoStock(disponible <= 0 ? `«${p.nombre}» no tiene stock disponible.` : `«${p.nombre}»: solo quedan ${disponible} y ya hay ${enCarrito} en la venta.`);
+        return prev;
+      }
       if (existente) {
-        return prev.map((l) => (l.clave === existente.clave ? { ...l, cantidad: l.cantidad + 1 } : l));
+        return prev.map((l) => (l.clave === existente.clave ? { ...l, cantidad: l.cantidad + 1, stockDisponible: disponible } : l));
       }
       return [
         ...prev,
@@ -86,6 +101,7 @@ export function Mostrador() {
           cantidad: 1,
           precioUnitario: p.precioVenta,
           precioCatalogo: p.precioVenta,
+          stockDisponible: disponible,
         },
       ];
     });
@@ -190,6 +206,8 @@ export function Mostrador() {
   }, [cola.ultimoResultado]);
 
   const ventaLista = useCallback(() => {
+    // R-014: tras cobrar, el stock del cache se refresca de inmediato (el delta trae los cambios de stock).
+    void refrescarCatalogo();
     setCarrito([]);
     setDescuento('');
     setClaveVenta(null);
@@ -211,7 +229,16 @@ export function Mostrador() {
     descuento,
     onDescuento: setDescuento,
     onCantidad: (clave: string, cantidad: number) =>
-      setCarrito((prev) => prev.map((l) => (l.clave === clave ? { ...l, cantidad } : l))),
+      setCarrito((prev) =>
+        prev.map((l) => {
+          if (l.clave !== clave) return l;
+          if (l.stockDisponible !== null && cantidad > l.stockDisponible) {
+            setAvisoStock(`«${l.descripcion}»: solo quedan ${l.stockDisponible}.`);
+            return { ...l, cantidad: l.stockDisponible };
+          }
+          return { ...l, cantidad };
+        }),
+      ),
     onPrecio: (clave: string, precio: number) =>
       setCarrito((prev) => prev.map((l) => (l.clave === clave ? { ...l, precioUnitario: precio } : l))),
     onEliminar: (clave: string) => setCarrito((prev) => prev.filter((l) => l.clave !== clave)),
@@ -244,6 +271,11 @@ export function Mostrador() {
       {bannerCaja ? (
         <div className="no-imprimir mb-3">
           <Banner tono="ok">{bannerCaja}</Banner>
+        </div>
+      ) : null}
+      {avisoStock ? (
+        <div className="no-imprimir mb-3" role="status">
+          <Banner tono="alerta">{avisoStock}</Banner>
         </div>
       ) : null}
 
@@ -325,7 +357,7 @@ export function Mostrador() {
         onAgregar={(descripcion, precio) => {
           setCarrito((prev) => [
             ...prev,
-            { clave: ulid(), productoId: null, descripcion, cantidad: 1, precioUnitario: precio, precioCatalogo: null },
+            { clave: ulid(), productoId: null, descripcion, cantidad: 1, precioUnitario: precio, precioCatalogo: null, stockDisponible: null },
           ]);
           setDialogo('ninguno');
         }}

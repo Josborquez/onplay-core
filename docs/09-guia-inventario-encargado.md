@@ -40,8 +40,8 @@ La nota es obligatoria en todos: sin ella no se guarda.
 ## Qué significan los avisos
 
 - **stock 3**: hay 3 en total (todas las ubicaciones).
-- **sin stock** (rojo): el sistema cree que no queda. Si el producto está en la mano del cliente, **véndelo igual**; el sistema avisa y el encargado lo revisa en Alertas.
-- **negativo** (rojo): se vendió más de lo que el sistema tenía. Hay que recontar.
+- **sin stock** (rojo): el sistema cree que no queda y **no deja agregarlo a la venta**. Si el producto está en la mano del cliente, el número del sistema está mal: un encargado lo corrige con **Ingresar** o **Recontar** y después se vende.
+- El carrito no acepta más unidades que las disponibles; el «+» se apaga en el tope.
 - **último en la web**: la tienda online muestra 1. Avísale al cliente si es la última.
 - **agotado en la web / reservado para un pedido web pagado**: la web ya lo vendió y cobró. **El pedido web tiene prioridad.** El vendedor no puede cobrarlo; un encargado puede «vender igual» escribiendo el motivo, y queda registrado.
 

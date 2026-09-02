@@ -46,7 +46,7 @@ Al terminar E2:
 - **No calcula costos ni márgenes.** `costo_referencia` y el costo promedio ponderado son E6. `movimiento_stock` no lleva costo.
 - **No crea órdenes de compra ni proveedores** (E6). El motivo `compra` sirve para ingresos manuales de mercadería con nota, sin OC.
 - **No obliga a inventariar el catálogo completo.** 2.878 singles de onplay.cl pueden quedar con `controlaStock = false` hasta el final de la etapa o más allá.
-- **No bloquea una venta por falta de stock** (§6.3). Tampoco un traslado ni una merma: el libro acepta negativos y los reporta.
+- **No acepta stock negativo** (§6.3, R-014): venta, merma, ajuste o traslado que dejarían la ubicación bajo cero se rechazan.
 - **No implementa números de serie ni unidades individuales por carta** (el modelo `StockUnit` de onplay-erp). Todo es cantidad por producto y ubicación. Si algún día una carta puntual necesita identidad propia, es un producto distinto.
 - **No toca el arqueo de E1 salvo para restar devoluciones y sumar/restar movimientos de caja** (§6.6, §6.7). La fórmula `calcularArqueo` gana dos términos; no cambia de forma.
 
@@ -74,7 +74,7 @@ Las prioridades P0 son el corte mínimo para que E2 sea útil sola (P1 del SDD g
 ## 4. Principios de esta etapa
 
 - **M1 — Nada cambia `stock_actual` salvo una fila nueva en `movimiento_stock`, en la misma transacción.** Es P5 llevado al código: no hay `UPDATE stock_actual SET cantidad = x` fuera de `registrarMovimiento`.
-- **M2 — El stock puede ser negativo, y eso es una alerta, no un error.** Bloquear cuesta ventas; avisar cuesta un recuento.
+- **M2 — El stock nunca queda negativo (R-014, decisión del dueño 2026-09-02).** Toda salida mayor que lo disponible se rechaza: la venta no acepta más unidades que las que hay, y un ajuste, merma o traslado que dejaría la ubicación bajo cero devuelve `422 STOCK_INSUFICIENTE`. *(Reemplaza la M2 original «el stock puede ser negativo y es una alerta».)*
 - **M3 — Todo movimiento tiene usuario, motivo y referencia.** `usuarioId` obligatorio (como M5 de E4). Los motivos manuales (`ajuste`, `merma`, `traslado`, `compra`) exigen `nota`.
 - **M4 — Un traslado es un solo acto y dos filas.** Sale de A y entra a B en la misma transacción, con el mismo `referenciaId` (el id del traslado). Nunca queda medio traslado.
 - **M5 — `controlaStock` se enciende con datos, no a mano.** Se activa al cerrar un recuento que incluyó al producto (o al registrar su primer ingreso manual). Apagarlo es una acción auditada del encargado con nota.
@@ -286,14 +286,14 @@ Las reglas puras viven en `packages/dominio/src/stock.ts` con tests desde el pri
 - **Estados** (`estadoStock` en el dominio, puro): `sin_control` (controlaStock false) · `negativo` (< 0 en alguna ubicación) · `quiebre` (total = 0) · `bajo` (0 < total ≤ stockMinimo) · `ok`.
 - El mostrador muestra el total y el de la ubicación de venta; la ficha (V5) muestra el desglose por ubicación (cierra el «Agendado (E2)» de R-009).
 
-### 6.3 La venta descuenta (C3) — y nunca bloquea (M2)
+### 6.3 La venta descuenta (C3) — y nunca deja negativo (M2, R-014)
 
 Dentro de la transacción de `POST /ventas`, por cada línea con `productoId` cuyo producto tenga `controlaStock = true`:
 
 - `registrarMovimiento(-cantidad, motivo 'venta', referenciaTipo 'venta', referenciaId = venta.id, ubicacion = la única con esVenta)`.
-- Si el resultado deja la ubicación en negativo, la venta **igual se registra** y la respuesta trae `advertencias: [{ tipo: 'STOCK_NEGATIVO', productoId, ubicacion, cantidadNueva }]` (mismo vehículo que las advertencias de precio congelado de E1). El mostrador lo muestra un momento; el panel de alertas lo lista hasta que un recuento o ajuste lo cierre.
+- **R-014:** si la salida dejaría la ubicación en negativo, `registrarMovimiento` lanza `STOCK_INSUFICIENTE {productoId, disponible, solicitado}` y **la venta entera se aborta** con `422` (+ `descripcion`). En el mostrador el tope se aplica antes: no se agregan más unidades que `stockVenta` del caché, el «+» del carrito se deshabilita en el tope y el cobro muestra el 422 si el stock cambió entre medio. *(El comportamiento original «se registra igual con advertencia STOCK_NEGATIVO» queda derogado; el tipo de advertencia se conserva en el contrato por compatibilidad pero ya no se emite.)*
 - Líneas sin `productoId` (ítem suelto) o con `controlaStock = false` no tocan el libro.
-- **Cola offline (P8):** las ventas encoladas descuentan cuando llegan al servidor, en el orden en que llegan. Es aceptable: el stock físico ya salió; el libro lo refleja con retraso.
+- **Cola offline (P8):** las ventas encoladas descuentan cuando llegan al servidor, en el orden en que llegan. El mostrador aplica el tope con el stock del caché, así que una venta encolada solo falla al llegar si el stock cambió entre medio; en ese caso queda como «no se pudo enviar» con el detalle (F10) y la resuelve el encargado.
 - **Anulación** (`POST /ventas/:id/anular`, sigue exigiendo turno abierto): por cada movimiento `venta` de esa venta, un movimiento **positivo** `devolucion` con la misma referencia. El original no se toca (P9).
 
 ### 6.4 Recuento guiado (C4)
@@ -443,7 +443,7 @@ Ingreso / Retiro, monto, nota. V8 muestra los movimientos del turno y el arqueo 
 
 | # | Decisión | Default propuesto | Alternativa |
 |---|---|---|---|
-| D-E2-1 | ¿La venta del mostrador bloquea cuando no hay stock? | **Ratificada con matiz (2026-09-02):** stock propio en 0 o negativo **no bloquea, advierte** (M2). **Sí se detiene** cuando el espejo del canal dice que la web ya vendió y cobró la última unidad (§6.9): salida solo de encargado con nota, auditada | — |
+| D-E2-1 | ¿La venta del mostrador bloquea cuando no hay stock? | **Decidido por el dueño (R-014, 2026-09-02): SÍ bloquea.** Con control, no se agregan más unidades que las disponibles y el servidor rechaza la venta con `422 STOCK_INSUFICIENTE`; el stock nunca queda negativo. Además se detiene cuando el espejo del canal dice que la web ya vendió y cobró la última unidad (§6.9): salida solo de encargado con nota, auditada | — |
 | D-E2-2 | ¿De qué ubicación descuenta la venta? | **`mostrador`** (única `esVenta`) | Elegir por línea (más clics, poco valor) |
 | D-E2-3 | Umbral de «último en la web» | **`stockCanal = 1`** avisa (no bloquea); **`stockCanal ≤ 0`** con stock propio detiene el cobro (§6.9) | Avisar desde 2 |
 | D-E2-4 | ¿Qué ubicación publica E3 después? | **`bodega`** `publicable` (recomendación de `06` §4) | `mostrador` |
@@ -477,7 +477,7 @@ README y CLAUDE.md al día; `docs/08` con lo aprendido; recuento real de snacks 
 2. No existe en el código ningún `UPDATE`/`upsert` de `StockActual` fuera de `registrarMovimiento` (grep en CI/test).
 3. Una venta de 2 unidades de un producto con control deja un movimiento `venta −2` con `referenciaId` = la venta; anularla deja `devolucion +2`; el original no cambia.
 4. Una venta de un producto **sin** control no genera movimientos.
-5. Dos `POST /ventas` simultáneos por la última unidad → ambos 201, `stock_actual = −1`, exactamente una respuesta con `STOCK_NEGATIVO` (la segunda en tomar el candado).
+5. Dos `POST /ventas` simultáneos por la última unidad → **exactamente una 201 y una `422 STOCK_INSUFICIENTE`**, `stock_actual = 0` (R-014; la versión original aceptaba las dos y dejaba −1).
 6. Una venta encolada offline descuenta al llegar al servidor con `idempotencyKey` repetida **una sola vez**.
 7. Cerrar un recuento con 3 líneas contadas y 2 sin contar enciende `controlaStock` en 3 y genera movimientos solo donde hay diferencia.
 8. Un traslado deja dos filas con la misma referencia; si la transacción falla a mitad, no queda ninguna.
