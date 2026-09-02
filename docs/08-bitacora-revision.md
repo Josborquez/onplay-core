@@ -27,6 +27,7 @@
 | R-009 | 2026-09-02 | Backoffice (V5) | Productos: paginación por página, grilla/lista, columna Stock y modal de ficha | Corregido (resuelve 05-SDD §14 H5; cantidad de stock agendada E2) |
 | R-010 | 2026-09-02 | Datos / Importador | 236 cartas Magic de onplay.cl con SKU maestro `IND-` (tipo indeterminado) | Abierto (investigar) |
 | R-011 | 2026-09-02 | Riesgo de negocio | Sobreventa entre web y mostrador con poco stock (ha ocurrido en la vida real) | Agendado (E2/E3) — regla de prioridad decidida y escrita en 03 §6.9 y 06 §8.4 |
+| R-012 | 2026-09-02 | Backoffice (V5) | Tipo = Sellado + Categoría = Magic no muestra nada | Corregido (filtro Juego + categoría por subárbol) |
 
 ---
 
@@ -142,6 +143,13 @@
   1. **Quién gana** cuando chocan — **DECIDIDO por el dueño el 2026-09-02:** la venta física en la tienda (Merced) tiene prioridad sobre la online; **la online gana si el pago está realizado**. Escrito en `03-SDD-etapa2-inventario.md` §6.9 (E2: bloqueo con salida de encargado cuando el espejo del canal muestra 0) y `06-SDD-etapa3-sincronizacion.md` §8.4 (E3c: solo pedidos pagados reservan; `pedido_sin_stock` a excepción manual).
   2. **Umbral de aviso** en el cobro: mostrar «último(s) N en la web» cuando el stock del canal sea ≤ umbral.
   3. **Espejo de solo lectura antes de E2:** guardar `stock_quantity`/`stock_status` del canal en `ProductoCanal` (`stockCanal`, `stockCanalEn`) en cada sync, para que el vendedor vea la cantidad web en la ficha y en el cobro. Es lectura pura (P2), no crea inventario propio ni toca la caja. Reduce el riesgo desde ya con costo bajo; ampliación de 02-SDD §5.2 si se aprueba.
+
+### R-012 · Tipo = Sellado + Categoría = Magic no muestra nada
+
+- **Fecha:** 2026-09-02. **Estado:** Corregido. Reporte del dueño.
+- **Qué pasaba:** no era un bug del filtro sino de la taxonomía de `02-SDD` §6.3: **todo el sellado vive en la categoría raíz «Sellado»** y el juego se guarda en `producto.juego` (string libre). «Magic» como categoría existe solo bajo «Cartas», así que la intersección Tipo = Sellado ∩ Categoría = Cartas > Magic es vacía por diseño (45 sellados de Magic tienen `categoria = sellado`, `juego = magic`). Además el filtro de categoría era exacto: elegir «Cartas» no traía a Magic ni a One Piece.
+- **Decisión:** (1) V5 gana el filtro **Juego**, alimentado por `GET /productos/juegos` (valores reales con conteo; la API ya aceptaba `juego`). Tipo = Sellado + Juego = Magic da los 45. (2) El filtro **Categoría pasa a subárbol** en `GET /productos` (elegir «Cartas» incluye sus hijas), igual que en `/stock` y `/recuentos`. (3) Cuando el cruce Sellado + una categoría de «Cartas» queda vacío, el mensaje explica dónde vive el sellado. No se mueve ningún producto de categoría: la taxonomía de la spec se mantiene.
+- **Archivos:** `apps/api/src/categorias.ts` (helper `idsSubarbol` compartido por productos/stock/recuentos), `apps/api/src/rutas/productos.ts`, `apps/web/src/pantallas/admin/Productos.tsx`.
 
 ---
 

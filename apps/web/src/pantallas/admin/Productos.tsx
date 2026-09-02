@@ -51,6 +51,16 @@ interface RespuestaProductos {
 const POR_PAGINA = 50;
 const CLAVE_VISTA = 'onplay.productos-vista';
 
+/** Nombre legible de los valores de `juego` (string libre en el dominio). */
+const ETIQUETA_JUEGO: Record<string, string> = {
+  magic: 'Magic',
+  pokemon: 'Pokémon',
+  one_piece: 'One Piece',
+  star_wars: 'Star Wars',
+  flesh_and_blood: 'Flesh and Blood',
+  riftbound: 'Riftbound',
+};
+
 const OPCIONES_TIPO = (Object.keys(ETIQUETA_TIPO) as TipoProducto[]).map((t) => ({
   valor: t,
   etiqueta: ETIQUETA_TIPO[t],
@@ -373,6 +383,8 @@ export function Productos() {
   const [parametros] = useSearchParams();
   const [q, setQ] = useState(parametros.get('q') ?? '');
   const [tipo, setTipo] = useState('');
+  const [juego, setJuego] = useState('');
+  const [juegos, setJuegos] = useState<{ juego: string; productos: number }[]>([]);
   const [categoriaId, setCategoriaId] = useState('');
   const [soloDuplicados, setSoloDuplicados] = useState<'si' | null>(null);
   const [actividad, setActividad] = useState<'activos' | 'inactivos' | null>(null);
@@ -389,6 +401,9 @@ export function Productos() {
 
   useEffect(() => {
     void categorias().then((arbol) => setOpcionesCategoria(aplanarCategorias(arbol)));
+    void api<{ juegos: { juego: string; productos: number }[] }>('/productos/juegos')
+      .then((r) => setJuegos(r.juegos))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -404,12 +419,13 @@ export function Productos() {
       const p = new URLSearchParams({ limit: String(POR_PAGINA), pagina: String(pag) });
       if (q.trim().length >= 2) p.set('q', q.trim());
       if (tipo) p.set('tipo', tipo);
+      if (juego) p.set('juego', juego);
       if (categoriaId) p.set('categoriaId', categoriaId);
       if (soloDuplicados) p.set('posibleDuplicado', 'true');
       if (actividad) p.set('activo', actividad === 'activos' ? 'true' : 'false');
       return api<RespuestaProductos>(`/productos?${p}`);
     },
-    [q, tipo, categoriaId, soloDuplicados, actividad],
+    [q, tipo, juego, categoriaId, soloDuplicados, actividad],
   );
 
   // Cualquier filtro vuelve a la página 1.
@@ -476,6 +492,15 @@ export function Productos() {
         <div className="w-[176px]">
           <Selecto etiqueta="Tipo" valor={tipo} onValor={setTipo} opciones={OPCIONES_TIPO} vacia="Todos" />
         </div>
+        <div className="w-[176px]">
+          <Selecto
+            etiqueta="Juego"
+            valor={juego}
+            onValor={setJuego}
+            opciones={juegos.map((j) => ({ valor: j.juego, etiqueta: `${ETIQUETA_JUEGO[j.juego] ?? j.juego} · ${j.productos}` }))}
+            vacia="Todos"
+          />
+        </div>
         <div className="w-[224px]">
           <Selecto
             etiqueta="Categoría"
@@ -512,7 +537,13 @@ export function Productos() {
         <Cargando />
       ) : datos.productos.length === 0 ? (
         <div className="rounded-tarjeta bg-bg p-4 shadow-tarjeta">
-          <Vacio mensaje="No hay productos con estos filtros. Ajusta la búsqueda o los filtros." />
+          <Vacio
+            mensaje={
+              tipo === 'sellado' && categoriaId && opcionesCategoria.find((c) => c.id === categoriaId)?.etiqueta.startsWith('Cartas')
+                ? 'El sellado no vive bajo «Cartas»: está en la categoría «Sellado» y su juego va aparte. Para el sellado de un juego usa Tipo = Sellado y el filtro Juego.'
+                : 'No hay productos con estos filtros. Ajusta la búsqueda o los filtros.'
+            }
+          />
         </div>
       ) : (
         <>

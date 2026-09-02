@@ -2,28 +2,13 @@
 // Los movimientos manuales, traslados y recuentos llegan en la Fase 3 (§6.4, §6.5).
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
+import { idsSubarbol } from '../categorias.js';
 import { ErrorStock, bloquearStock, registrarMovimiento, resumenStock, stockPorUbicacion } from '../stock/libro.js';
 import { avisoWeb, firmarCantidadManual, type EstadoStock, type MotivoStock } from '@onplay/dominio';
 import { randomUUID } from 'node:crypto';
 
 const ESTADOS: EstadoStock[] = ['sin_control', 'negativo', 'quiebre', 'bajo', 'ok'];
 
-/** Ids de una categoría y todas sus descendientes (árbol chico: se carga entero). */
-async function idsSubarbol(categoriaId: string): Promise<string[]> {
-  const todas = await prisma.categoria.findMany({ select: { id: true, padreId: true } });
-  const hijos = new Map<string, string[]>();
-  for (const c of todas) {
-    if (c.padreId) hijos.set(c.padreId, [...(hijos.get(c.padreId) ?? []), c.id]);
-  }
-  const ids: string[] = [];
-  const pila = [categoriaId];
-  while (pila.length) {
-    const id = pila.pop()!;
-    ids.push(id);
-    pila.push(...(hijos.get(id) ?? []));
-  }
-  return ids;
-}
 
 export default async function rutasStock(app: FastifyInstance) {
   const vendedor = { preHandler: app.requiereRol('vendedor') };

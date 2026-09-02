@@ -5,6 +5,7 @@ import type { Prisma, TipoProducto } from '@prisma/client';
 import { PREFIJO_POR_TIPO } from '@onplay/dominio';
 import { prisma } from '../db.js';
 import { adjuntarStock } from '../stock/libro.js';
+import { idsSubarbol } from '../categorias.js';
 import { ReservadorSku } from '../sync/importador.js';
 
 const TIPOS_VALIDOS = Object.keys(PREFIJO_POR_TIPO);
@@ -56,13 +57,15 @@ export default async function rutasProductos(app: FastifyInstance) {
     };
   }>('/productos', vendedor, async (req) => {
     const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 50) || 50));
+    // R-012: la categoría filtra por SUBÁRBOL (elegir «Cartas» incluye Magic, One Piece…).
+    const categoriaIds = req.query.categoriaId ? await idsSubarbol(req.query.categoriaId) : null;
     const where: Prisma.ProductoWhereInput = {
       ...(req.query.q ? { nombre: { contains: req.query.q } } : {}),
       ...(req.query.tipo && TIPOS_VALIDOS.includes(req.query.tipo)
         ? { tipo: req.query.tipo as TipoProducto }
         : {}),
       ...(req.query.juego ? { juego: req.query.juego } : {}),
-      ...(req.query.categoriaId ? { categoriaId: req.query.categoriaId } : {}),
+      ...(categoriaIds ? { categoriaId: { in: categoriaIds } } : {}),
       ...(req.query.activo !== undefined ? { activo: req.query.activo === 'true' } : {}),
       ...(req.query.posibleDuplicado !== undefined
         ? { posibleDuplicado: req.query.posibleDuplicado === 'true' }
@@ -91,6 +94,19 @@ export default async function rutasProductos(app: FastifyInstance) {
     const hayMas = productos.length > limit;
     if (hayMas) productos.pop();
     return { productos: await adjuntarStock(prisma, productos), total, siguienteCursor: hayMas ? productos[productos.length - 1]!.id : null };
+  });
+
+  // ---------- GET /productos/juegos — valores reales de `juego` (string libre, 02 §4.1) ----------
+  // R-012: el sellado vive en la categoría raíz «Sellado» y su juego va en `juego`; el
+  // backoffice necesita filtrar por juego para encontrar «sellado de Magic».
+  app.get('/productos/juegos', vendedor, async () => {
+    const filas = await prisma.producto.groupBy({
+      by: ['juego'],
+      where: { juego: { not: null }, activo: true },
+      _count: { _all: true },
+      orderBy: { _count: { juego: 'desc' } },
+    });
+    return { juegos: filas.map((f) => ({ juego: f.juego!, productos: f._count._all })) };
   });
 
   // ---------- GET /productos/buscar — mostrador, máx 20 por relevancia, p95 < 200 ms ----------
