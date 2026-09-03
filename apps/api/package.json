@@ -14,6 +14,7 @@
     "test": "vitest run",
     "seed": "prisma db seed",
     "crear-admin": "tsx scripts/crear-admin.ts",
+    "renumerar-ind": "tsx scripts/renumerar-ind.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy"

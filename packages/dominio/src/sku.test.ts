@@ -12,6 +12,18 @@ describe('skuMaestroDesdeExterno (§6.4)', () => {
     expect(skuMaestroDesdeExterno('BLB-123-LP-ES')).toBe('MTG-BLB-123-LP-ES');
   });
 
+  it('R-010: sufijo del número (promo, showcase, variante) y The List', () => {
+    expect(skuMaestroDesdeExterno('PTDM-240p-NM-EN')).toBe('MTG-PTDM-240p-NM-EN');
+    expect(skuMaestroDesdeExterno('PEOE-20p-NM-EN')).toBe('MTG-PEOE-020p-NM-EN');
+    expect(skuMaestroDesdeExterno('PTLA-116s-NM-EN')).toBe('MTG-PTLA-116s-NM-EN');
+    expect(skuMaestroDesdeExterno('PGPX-2013a-NM-EN')).toBe('MTG-PGPX-2013a-NM-EN');
+    expect(skuMaestroDesdeExterno('PRAV-247?-NM-EN')).toBe('MTG-PRAV-247?-NM-EN');
+    expect(skuMaestroDesdeExterno('PLST-5DN-107-NM-EN')).toBe('MTG-PLST-5DN-107-NM-EN');
+    expect(skuMaestroDesdeExterno('PLST-BBD-73-LP-ES')).toBe('MTG-PLST-BBD-073-LP-ES');
+    // dos letras de sufijo no es una forma conocida
+    expect(skuMaestroDesdeExterno('PTDM-240pp-NM-EN')).toBeNull();
+  });
+
   it('condiciones válidas: NM, LP, MP, HP, DMG', () => {
     expect(skuMaestroDesdeExterno('MOM-75-DMG-EN')).toBe('MTG-MOM-075-DMG-EN');
     expect(skuMaestroDesdeExterno('MOM-75-XX-EN')).toBeNull();

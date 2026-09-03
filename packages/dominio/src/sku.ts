@@ -27,7 +27,9 @@ export const PREFIJO_POR_TIPO: Record<TipoProducto, string> = {
   single: 'IND',
 };
 
-const PATRON_MTG = /^([A-Z0-9]{2,5})-(\d+)-(NM|LP|MP|HP|DMG)-([A-Z]{2})$/;
+// R-010: el número de coleccionista puede llevar sufijo (promos «240p», showcase «116s»,
+// variantes «2013a», «259?» del Binder OP) y The List se publica como PLST-{SET}-{NUM}.
+const PATRON_MTG = /^(?:(PLST)-)?([A-Z0-9]{2,5})-(\d+)([a-z?★]?)-(NM|LP|MP|HP|DMG)-([A-Z]{2})$/;
 
 /**
  * SKU maestro derivable directamente del SKU externo (casos 1 y 2 de §6.4).
@@ -38,8 +40,8 @@ export function skuMaestroDesdeExterno(externoSku: string | null | undefined): s
   if (externoSku.startsWith('OP-')) return `OPT-${externoSku.slice(3)}`;
   const mtg = externoSku.match(PATRON_MTG);
   if (mtg) {
-    const [, set, num, cond, idioma] = mtg;
-    return `MTG-${set}-${num!.padStart(3, '0')}-${cond}-${idioma}`;
+    const [, lista, set, num, sufijo, cond, idioma] = mtg;
+    return `MTG-${lista ? 'PLST-' : ''}${set}-${num!.padStart(3, '0')}${sufijo ?? ''}-${cond}-${idioma}`;
   }
   return null;
 }

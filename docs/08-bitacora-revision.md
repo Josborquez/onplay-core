@@ -25,7 +25,7 @@
 | R-007 | 2026-09-02 | Mostrador (V2) | Panel de venta sin botón Eliminar en la línea | Corregido |
 | R-008 | 2026-09-02 | Backoffice (V18) | Sin forma de crear un cliente desde `/admin/clientes` | Corregido (amplía 07-SDD V18) |
 | R-009 | 2026-09-02 | Backoffice (V5) | Productos: paginación por página, grilla/lista, columna Stock y modal de ficha | Corregido (resuelve 05-SDD §14 H5; cantidad de stock agendada E2) |
-| R-010 | 2026-09-02 | Datos / Importador | 236 cartas Magic de onplay.cl con SKU maestro `IND-` (tipo indeterminado) | Abierto (investigar) |
+| R-010 | 2026-09-02 | Datos / Importador | 236 cartas Magic de onplay.cl con SKU maestro `IND-` | Corregido (2026-09-03: patrón MTG ampliado + 235 renumeradas y auditadas; queda 1) |
 | R-011 | 2026-09-02 | Riesgo de negocio | Sobreventa entre web y mostrador con poco stock (ha ocurrido en la vida real) | Agendado (E2/E3) — regla de prioridad decidida y escrita en 03 §6.9 y 06 §8.4 |
 | R-012 | 2026-09-02 | Backoffice (V5) | Tipo = Sellado + Categoría = Magic no muestra nada | Corregido (filtro Juego + categoría por subárbol) |
 | R-013 | 2026-09-02 | Etapa 2 | Cierre de E2: código completo, queda el recuento real (criterio 18) | Abierto (del dueño) |
@@ -123,7 +123,9 @@
 - **Fecha:** 2026-09-02. **Estado:** Abierto (visto al revisar R-009; no se tocó).
 - **Qué se ve:** en la grilla de productos aparecen cartas Magic (ej. «Angel's Trumpet» `IND-000016`, «Angelic Gift» `IND-000066`) con prefijo `IND-` = tipo `indeterminado`, mientras el resto lleva `MTG-SET-NNN-NM-EN`. Son 236, todas activas, todas en la categoría Magic y todas del canal onplay_cl.
 - **Hipótesis:** el SKU externo de esas cartas no calza con la forma `MTG-…` de 02-SDD §6.4, así que `skuMaestroDesdeExterno` devuelve null y el importador reserva un correlativo con el tipo del mapeo, que para ellas salió `indeterminado` en vez de `single`. Hay que mirar el `externoSku` real de algunas (`ProductoCanal`) y el mapeo de onplay.cl.
-- **Por qué importa:** el tipo alimenta el prefijo del SKU y los filtros por tipo; una carta `indeterminado` no aparece al filtrar «Cartas sueltas». Corregir el tipo es un `PATCH` auditado; el SKU maestro **no se renumera** (P3 aplica al SKU publicado; el maestro es interno, pero cambiarlo en 236 filas merece decisión aparte).
+- **Diagnóstico (2026-09-03):** el tipo era correcto (`single`); lo que fallaba era `skuMaestroDesdeExterno`: el patrón Magic exigía un número de coleccionista solo numérico, y esas 236 cartas traen sufijo (promos «240p», showcase «116s», variantes «2013a», «259★») o son de The List (`PLST-{SET}-{NUM}`). Al no reconocerlas, el importador reservaba un correlativo y `PREFIJO_POR_TIPO.single` es `IND` por diseño (§6.4).
+- **Corrección:** patrón ampliado en `packages/dominio/src/sku.ts` (sufijo opcional de un carácter y prefijo `PLST-`) con tests; script `npm run renumerar-ind -- [--aplicar] [--admin <email>]` (`apps/api/scripts/renumerar-ind.ts`): simula por defecto, aplica en una transacción y deja Auditoria `editar` por producto con el SKU anterior. Aplicado en dev: **235 renumeradas** a `MTG-…` (55 de The List como `MTG-PLST-SET-NNN-…`), 0 colisiones, **queda 1** sin forma reconocible: `IND-000048` «Nykthos, Shrine to Nyx» con SKU externo `PPRO-2022-3-NM-EN` (promo Pro Tour con año y número, formato único; no vale la pena una regla).
+- **Decisión sobre P3:** el SKU maestro es interno y nunca se publicó (`02` §6.4); ninguna venta lo referencia por texto (0 líneas). Renumerarlo no toca ningún canal. En producción hay que correr el script una vez tras la importación inicial (o importar ya con el patrón nuevo).
 
 ### R-011 · Sobreventa entre web y mostrador con poco stock
 

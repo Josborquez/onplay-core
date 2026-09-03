@@ -12,7 +12,8 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "seed": "npm run seed -w @onplay/api",
-    "crear-admin": "npm run crear-admin -w @onplay/api"
+    "crear-admin": "npm run crear-admin -w @onplay/api",
+    "renumerar-ind": "npm run renumerar-ind -w @onplay/api"
   },
   "engines": {
     "node": ">=20"
